@@ -99,6 +99,8 @@ document.addEventListener('DOMContentLoaded', () => {
     $('stale-items').checked = !!oc.staleItems;
     $('bug-ratio-trend').checked = !!oc.bugRatioTrend;
     $('tp-predictability').checked = !!oc.throughputPredictability;
+    $('priority-age-dist').checked = !!oc.priorityAgeDistribution;
+    $('cfd-chart').checked = !!oc.cfdChart;
   });
 });
 
@@ -124,7 +126,9 @@ function save() {
       flowEfficiency: $('flow-efficiency').checked,
       staleItems: $('stale-items').checked,
       bugRatioTrend: $('bug-ratio-trend').checked,
-      throughputPredictability: $('tp-predictability').checked
+      throughputPredictability: $('tp-predictability').checked,
+      priorityAgeDistribution: $('priority-age-dist').checked,
+      cfdChart: $('cfd-chart').checked
     }
   };
 
