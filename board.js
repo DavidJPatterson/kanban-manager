@@ -25,6 +25,9 @@ function getColumnOrder(name) { const i = DEFAULT_COLUMN_ORDER.indexOf(name); re
 
 function $(id) { return document.getElementById(id); }
 
+// Persisted filter state per pod — loaded from storage during init
+let _boardFilters = {};
+
 function escHtml(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
@@ -563,6 +566,47 @@ async function buildOverviewPanel(cachedData) {
     }
   }
 
+  // ── Optional: Priority Age Distribution ──
+  if (oc.priorityAgeDistribution) {
+    const prioAge = calcPriorityAgeDistribution(allItems);
+    const div = document.createElement('div');
+    div.className = 'metric-chart';
+    div.innerHTML = tip('Priority Age Distribution', 'Active items grouped by age band and priority (P1/P2/P3). Red bars are P1 — any P1 items in the 60d+ buckets need immediate attention. Helps identify aged high-priority debt before it becomes critical.') + '<div class="prio-age-chart"></div>';
+    chartsGrid.appendChild(div);
+    renderPriorityAgeChart(div.querySelector('.prio-age-chart'), prioAge, { width: 500, height: 150 });
+
+    for (const block of perPodContainer.querySelectorAll('[data-pod-id]')) {
+      const pod = pods.find(p => p.id === block.dataset.podId);
+      if (!pod) continue;
+      const podPrioAge = calcPriorityAgeDistribution(pod.items || []);
+      if (!podPrioAge.priorities.length) continue;
+      const d = document.createElement('div');
+      d.innerHTML = '<div style="font-size:.68rem;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-bottom:.2rem">Priority Age Distribution</div><div class="pod-prio-age"></div>';
+      block.querySelector('.pod-charts-grid').appendChild(d);
+      renderPriorityAgeChart(d.querySelector('.pod-prio-age'), podPrioAge, { width: 400, height: 130 });
+    }
+  }
+
+  // ── Optional: Cumulative Flow Diagram ──
+  if (oc.cfdChart) {
+    const cfd = calcCumulativeFlow(allItems, 12);
+    const div = document.createElement('div');
+    div.className = 'metric-chart';
+    div.innerHTML = tip('Cumulative Flow Diagram', 'Cumulative arrival and closure counts over 12 weeks. The amber band between the two lines is your live WIP. A widening band means work is arriving faster than it is being closed — a leading indicator of future delays.') + '<div class="cfd-chart"></div>';
+    chartsGrid.appendChild(div);
+    renderCFDChart(div.querySelector('.cfd-chart'), cfd, { width: 500, height: 160 });
+
+    for (const block of perPodContainer.querySelectorAll('[data-pod-id]')) {
+      const pod = pods.find(p => p.id === block.dataset.podId);
+      if (!pod) continue;
+      const podCfd = calcCumulativeFlow(pod.items || [], 12);
+      const d = document.createElement('div');
+      d.innerHTML = '<div style="font-size:.68rem;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-bottom:.2rem">Cumulative Flow Diagram</div><div class="pod-cfd"></div>';
+      block.querySelector('.pod-charts-grid').appendChild(d);
+      renderCFDChart(d.querySelector('.pod-cfd'), podCfd, { width: 400, height: 140 });
+    }
+  }
+
   if (oc.burndownByPI) {
     const piValues = [...new Set(allItems.map(i => i.targetPI).filter(Boolean))].sort();
     if (piValues.length > 0) {
@@ -808,6 +852,9 @@ function buildPodPanel(pod) {
       card.classList.toggle('hidden', !(filterShow && searchShow));
     });
     updateColCounts();
+    // Persist filter state for this pod
+    _boardFilters[pod.id] = { filter: v, search: query };
+    chrome.storage.local.set({ boardFilters: _boardFilters });
   }
 
   // Wire search input
@@ -824,6 +871,25 @@ function buildPodPanel(pod) {
     btn.classList.add('active');
     applyFilters();
   });
+
+  // Restore previously saved filter state for this pod
+  const savedFilter = _boardFilters[pod.id];
+  if (savedFilter) {
+    if (savedFilter.search) {
+      const si = panel.querySelector('.search-input');
+      if (si) si.value = savedFilter.search;
+    }
+    if (savedFilter.filter && savedFilter.filter !== 'all') {
+      const btn = panel.querySelector(`.filter-btn[data-filter="${CSS.escape(savedFilter.filter)}"]`);
+      if (btn) {
+        panel.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+      }
+    }
+    if (savedFilter.search || (savedFilter.filter && savedFilter.filter !== 'all')) {
+      applyFilters();
+    }
+  }
 
   // ── Drag-and-drop ──
   let _draggedCard = null;
@@ -884,6 +950,11 @@ function buildPodPanel(pod) {
       const card = _draggedCard;
       const itemId = parseInt(card.dataset.itemId, 10);
 
+      // Capture original position and rank before any DOM mutation (for revert on failure)
+      const originalParent = card.parentElement;
+      const originalNextSibling = card.nextSibling;
+      const originalStackRank = card.dataset.stackRank;
+
       // Find insertion point
       const cards = [...colBody.querySelectorAll('.card:not(.dragging)')];
       let insertBefore = null;
@@ -905,9 +976,8 @@ function buildPodPanel(pod) {
       card.dataset.stackRank = newRank;
 
       // Detect cross-column move
-      const oldColumn = card.closest('.col-body')?.dataset.column;
       const newColumn = colBody.dataset.column;
-      const crossColumn = oldColumn !== newColumn ? newColumn : null;
+      const crossColumn = originalParent !== colBody ? newColumn : null;
 
       // Save to ADO
       card.classList.add('saving');
@@ -918,8 +988,11 @@ function buildPodPanel(pod) {
         updateColCounts();
       } catch (err) {
         card.classList.remove('saving');
+        // Revert card to its original position and rank
+        originalParent.insertBefore(card, originalNextSibling);
+        card.dataset.stackRank = originalStackRank;
+        updateColCounts();
         showBanner(`⚠ Failed to save card reorder: ${err.message}`, 'err');
-        // Revert would require storing original position — for now just warn
       }
     });
   });
@@ -975,6 +1048,10 @@ chrome.runtime.onMessage.addListener(msg => {
 });
 
 (async () => {
+  // Load persisted filter state before first render so panels restore correctly
+  const stored = await new Promise(r => chrome.storage.local.get('boardFilters', r));
+  _boardFilters = stored.boardFilters || {};
+
   const settings = await getSettings();
   $('refresh-interval').textContent = settings.refreshInterval || 15;
 

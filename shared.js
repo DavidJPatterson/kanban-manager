@@ -18,7 +18,9 @@ const DEFAULT_SETTINGS = {
     flowEfficiency: false,
     staleItems: false,
     bugRatioTrend: false,
-    throughputPredictability: false
+    throughputPredictability: false,
+    priorityAgeDistribution: false,
+    cfdChart: false
   }
 };
 
@@ -78,19 +80,38 @@ async function updateArrivedAtCache(entries) {
 // ─── ADO REST API ──────────────────────────────────────────────────────────────
 
 async function adoFetch(url, settings, options = {}) {
-  const resp = await fetch(url, {
-    ...options,
-    headers: {
-      'Authorization': `Basic ${btoa(':' + settings.pat)}`,
-      'Content-Type': 'application/json',
-      ...(options.headers || {})
+  const MAX_RETRIES = 3;
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    let resp;
+    try {
+      resp = await fetch(url, {
+        ...options,
+        headers: {
+          'Authorization': `Basic ${btoa(':' + settings.pat)}`,
+          'Content-Type': 'application/json',
+          ...(options.headers || {})
+        }
+      });
+    } catch (networkErr) {
+      // Network-level failure (offline, DNS, CORS etc.) — retry with backoff
+      if (attempt < MAX_RETRIES) {
+        await new Promise(r => setTimeout(r, (2 ** attempt) * 1000));
+        continue;
+      }
+      throw networkErr;
     }
-  });
-  if (!resp.ok) {
-    const body = await resp.text().catch(() => '');
-    throw new Error(`ADO ${resp.status}: ${resp.statusText} — ${body.slice(0, 200)}`);
+    if (!resp.ok) {
+      const body = await resp.text().catch(() => '');
+      const err = new Error(`ADO ${resp.status}: ${resp.statusText} — ${body.slice(0, 200)}`);
+      // Retry only on server errors (5xx) or rate limit (429); never on 4xx auth/not-found
+      if ((resp.status >= 500 || resp.status === 429) && attempt < MAX_RETRIES) {
+        await new Promise(r => setTimeout(r, (2 ** attempt) * 1000));
+        continue;
+      }
+      throw err;
+    }
+    return resp.json();
   }
-  return resp.json();
 }
 
 async function runWiql(query, settings) {
@@ -491,6 +512,50 @@ function calcAgeDistribution(items) {
       return days >= band.min && days < band.max;
     }).length
   }));
+}
+
+// ─── Priority Age Distribution: active items grouped by priority × age band ──
+
+function calcPriorityAgeDistribution(items) {
+  const active = items.filter(i => !['Closed', 'Removed', 'Resolved'].includes(i.state));
+  const bands = [
+    { label: '0–14d',  min: 0,   max: 14 },
+    { label: '14–30d', min: 14,  max: 30 },
+    { label: '30–60d', min: 30,  max: 60 },
+    { label: '60–90d', min: 60,  max: 90 },
+    { label: '90d+',   min: 90,  max: Infinity }
+  ];
+  const PRIORITY_COLORS = { 1: '#ef4444', 2: '#f59e0b', 3: '#64748b' };
+  const rows = [1, 2, 3].map(p => ({
+    priority: p,
+    label: `P${p}`,
+    color: PRIORITY_COLORS[p],
+    counts: bands.map(band => active.filter(i => {
+      const days = ageDays(i);
+      return (i.priority || 2) === p && days >= band.min && days < band.max;
+    }).length)
+  })).filter(row => row.counts.some(c => c > 0));
+  return { bands: bands.map(b => b.label), priorities: rows };
+}
+
+// ─── Cumulative Flow Diagram: weekly cumulative arrivals vs closures ──────────
+
+function calcCumulativeFlow(items, weeksBack = 12) {
+  const buckets = weekBuckets(weeksBack);
+  let cumArrived = 0;
+  let cumClosed = 0;
+  return buckets.map(({ start, end, label }) => {
+    cumArrived += items.filter(i => {
+      const d = new Date(i.arrivedAt || i.created);
+      return d >= start && d <= end;
+    }).length;
+    cumClosed += items.filter(i => {
+      if (!i.closed && !i.resolved) return false;
+      const d = new Date(i.closed || i.resolved);
+      return d >= start && d <= end;
+    }).length;
+    return { label, arrived: cumArrived, closed: cumClosed };
+  });
 }
 
 // ─── Flow Efficiency: active time / total time for closed items ──────────────
@@ -1173,4 +1238,154 @@ function renderMetricCard(container, metrics) {
     </div>`
   ).join('');
   container.style.cssText = 'display:flex;gap:.75rem;flex-wrap:wrap;justify-content:center';
+}
+
+// ─── Priority Age chart: stacked bars — age bands × priority ─────────────────
+
+function renderPriorityAgeChart(container, data, opts = {}) {
+  if (!data.priorities.length) {
+    container.innerHTML = '<div style="font-size:.75rem;color:#64748b;padding:.5rem">No active items</div>';
+    return;
+  }
+
+  const W = opts.width || 500;
+  const H = opts.height || 150;
+  const PAD = { top: 16, right: 80, bottom: 46, left: 28 };
+  const chartW = W - PAD.left - PAD.right;
+  const chartH = H - PAD.top - PAD.bottom;
+
+  const n = data.bands.length;
+  const groupW = chartW / n;
+  const barW = Math.max(8, groupW - 10);
+
+  // Stacked totals per band
+  const totals = data.bands.map((_, bi) =>
+    data.priorities.reduce((s, p) => s + p.counts[bi], 0)
+  );
+  const maxVal = Math.max(1, ...totals);
+
+  let svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" style="width:100%;height:auto">`;
+
+  // Grid lines
+  for (let i = 0; i <= 4; i++) {
+    const y = PAD.top + chartH * (1 - i / 4);
+    const val = Math.round((maxVal * i) / 4);
+    svg += `<line x1="${PAD.left}" y1="${y}" x2="${PAD.left + chartW}" y2="${y}" stroke="#334155" stroke-width="1"/>`;
+    svg += `<text x="${PAD.left - 4}" y="${y + 4}" text-anchor="end" font-size="9" fill="#64748b">${val}</text>`;
+  }
+
+  // Stacked bars — bottom to top: P3, P2, P1
+  const reversed = [...data.priorities].reverse();
+  data.bands.forEach((_, bi) => {
+    const x = PAD.left + bi * groupW + (groupW - barW) / 2;
+    let yOffset = 0;
+    for (const row of reversed) {
+      const count = row.counts[bi];
+      if (!count) continue;
+      const barH = (count / maxVal) * chartH;
+      const y = PAD.top + chartH - yOffset - barH;
+      svg += `<rect x="${x}" y="${y}" width="${barW}" height="${barH}" rx="2" fill="${row.color}" opacity="0.85"><title>${row.label}: ${count}</title></rect>`;
+      yOffset += barH;
+    }
+    if (totals[bi] > 0) {
+      svg += `<text x="${x + barW / 2}" y="${PAD.top + chartH - yOffset - 3}" text-anchor="middle" font-size="9" fill="#94a3b8">${totals[bi]}</text>`;
+    }
+  });
+
+  // X-axis labels
+  data.bands.forEach((label, i) => {
+    const cx = PAD.left + i * groupW + groupW / 2;
+    const cy = PAD.top + chartH + 8;
+    svg += `<text transform="rotate(-35,${cx},${cy})" x="${cx}" y="${cy}" text-anchor="end" font-size="9" fill="#64748b">${label}</text>`;
+  });
+
+  // Legend (right side)
+  data.priorities.forEach((row, i) => {
+    const lx = PAD.left + chartW + 6;
+    const ly = PAD.top + i * 16 + 10;
+    svg += `<rect x="${lx}" y="${ly - 7}" width="9" height="9" rx="2" fill="${row.color}"/>`;
+    svg += `<text x="${lx + 13}" y="${ly}" font-size="9" fill="#94a3b8">${row.label}</text>`;
+  });
+
+  svg += '</svg>';
+  container.innerHTML = svg;
+}
+
+// ─── CFD chart: cumulative arrivals vs cumulative closures ────────────────────
+
+function renderCFDChart(container, data, opts = {}) {
+  if (!data.length) {
+    container.innerHTML = '<div style="font-size:.75rem;color:#64748b;padding:.5rem">No data available</div>';
+    return;
+  }
+
+  const W = opts.width || 500;
+  const H = opts.height || 160;
+  const PAD = { top: 10, right: 15, bottom: 46, left: 36 };
+  const chartW = W - PAD.left - PAD.right;
+  const chartH = H - PAD.top - PAD.bottom;
+  const n = data.length;
+
+  const maxVal = Math.max(1, ...data.map(d => d.arrived));
+
+  function px(i) { return PAD.left + (i / (n - 1 || 1)) * chartW; }
+  function py(v) { return PAD.top + chartH * (1 - v / maxVal); }
+
+  let svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" style="width:100%;height:auto">`;
+
+  // Grid lines
+  for (let i = 0; i <= 4; i++) {
+    const y = PAD.top + chartH * (1 - i / 4);
+    const val = Math.round((maxVal * i) / 4);
+    svg += `<line x1="${PAD.left}" y1="${y}" x2="${PAD.left + chartW}" y2="${y}" stroke="#334155" stroke-width="1"/>`;
+    svg += `<text x="${PAD.left - 4}" y="${y + 4}" text-anchor="end" font-size="9" fill="#64748b">${val}</text>`;
+  }
+
+  // Filled WIP band between arrival and closed lines
+  const arrPts = data.map((d, i) => `${px(i)},${py(d.arrived)}`).join(' ');
+  const clsPtsRev = [...data].reverse().map((d, i) => `${px(n - 1 - i)},${py(d.closed)}`).join(' ');
+  svg += `<polygon points="${arrPts} ${clsPtsRev}" fill="#f59e0b" opacity="0.12"/>`;
+
+  // Closed line
+  const closedPts = data.map((d, i) => `${px(i)},${py(d.closed)}`).join(' ');
+  svg += `<polyline points="${closedPts}" fill="none" stroke="#10b981" stroke-width="2"/>`;
+
+  // Arrival line
+  const arrivedPts = data.map((d, i) => `${px(i)},${py(d.arrived)}`).join(' ');
+  svg += `<polyline points="${arrivedPts}" fill="none" stroke="#6366f1" stroke-width="2"/>`;
+
+  // Dots
+  data.forEach((d, i) => {
+    svg += `<circle cx="${px(i)}" cy="${py(d.arrived)}" r="2.5" fill="#6366f1"/>`;
+    svg += `<circle cx="${px(i)}" cy="${py(d.closed)}" r="2.5" fill="#10b981"/>`;
+  });
+
+  // Current WIP annotation (last point gap)
+  const last = data[data.length - 1];
+  const wip = last.arrived - last.closed;
+  if (wip > 0) {
+    const lx = px(n - 1) + 4;
+    const midY = (py(last.arrived) + py(last.closed)) / 2;
+    svg += `<line x1="${px(n - 1)}" y1="${py(last.arrived)}" x2="${px(n - 1)}" y2="${py(last.closed)}" stroke="#f59e0b" stroke-width="1.5" stroke-dasharray="3,2"/>`;
+    svg += `<text x="${lx}" y="${midY + 3}" font-size="9" fill="#f59e0b" font-weight="600">WIP ${wip}</text>`;
+  }
+
+  // X-axis labels
+  data.forEach((d, i) => {
+    const cx = px(i);
+    const cy = PAD.top + chartH + 8;
+    svg += `<text transform="rotate(-45,${cx},${cy})" x="${cx}" y="${cy}" text-anchor="end" font-size="8" fill="#64748b">${d.label}</text>`;
+  });
+
+  // Legend
+  const ly = H - 8;
+  svg += `<line x1="${PAD.left}" y1="${ly - 3}" x2="${PAD.left + 12}" y2="${ly - 3}" stroke="#6366f1" stroke-width="2"/>`;
+  svg += `<text x="${PAD.left + 16}" y="${ly}" font-size="9" fill="#94a3b8">Arrived (cumul.)</text>`;
+  svg += `<line x1="${PAD.left + 110}" y1="${ly - 3}" x2="${PAD.left + 122}" y2="${ly - 3}" stroke="#10b981" stroke-width="2"/>`;
+  svg += `<text x="${PAD.left + 126}" y="${ly}" font-size="9" fill="#94a3b8">Closed (cumul.)</text>`;
+  svg += `<rect x="${PAD.left + 230}" y="${ly - 9}" width="9" height="9" rx="2" fill="#f59e0b" opacity="0.4"/>`;
+  svg += `<text x="${PAD.left + 243}" y="${ly}" font-size="9" fill="#94a3b8">WIP band</text>`;
+
+  svg += '</svg>';
+  container.innerHTML = svg;
 }
