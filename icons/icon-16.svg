@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="16" y2="16" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#1e3a5f"/>
+      <stop offset="1" stop-color="#0f172a"/>
+    </linearGradient>
+  </defs>
+  <rect width="16" height="16" rx="3" fill="url(#bg)"/>
+  <!-- Three columns -->
+  <rect x="2" y="4" width="3.2" height="9" rx="0.5" fill="rgba(255,255,255,0.06)"/>
+  <rect x="6.4" y="4" width="3.2" height="9" rx="0.5" fill="rgba(255,255,255,0.06)"/>
+  <rect x="10.8" y="4" width="3.2" height="9" rx="0.5" fill="rgba(255,255,255,0.06)"/>
+  <!-- Cards col 1 -->
+  <rect x="2.4" y="4.5" width="2.4" height="1.8" rx="0.4" fill="#6366f1" opacity="0.85"/>
+  <rect x="2.4" y="7" width="2.4" height="1.8" rx="0.4" fill="#6366f1" opacity="0.85"/>
+  <!-- Cards col 2 -->
+  <rect x="6.8" y="4.5" width="2.4" height="1.8" rx="0.4" fill="#f59e0b" opacity="0.85"/>
+  <rect x="6.8" y="7" width="2.4" height="1.8" rx="0.4" fill="#f59e0b" opacity="0.85"/>
+  <rect x="6.8" y="9.5" width="2.4" height="1.8" rx="0.4" fill="#f59e0b" opacity="0.85"/>
+  <!-- Cards col 3 -->
+  <rect x="11.2" y="4.5" width="2.4" height="1.8" rx="0.4" fill="#10b981" opacity="0.85"/>
+</svg>

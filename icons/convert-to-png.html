@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html>
+<head><title>SVG to PNG Converter</title></head>
+<body style="font-family:sans-serif;padding:2rem;background:#1e293b;color:#e2e8f0">
+<h2>Icon Converter — Save PNGs</h2>
+<p>Click each "Download" button to save the PNG file. Place them in the icons/ folder.</p>
+<div id="output" style="display:flex;gap:2rem;flex-wrap:wrap;margin-top:1rem"></div>
+<script>
+const sizes = [16, 48, 128];
+const container = document.getElementById('output');
+
+sizes.forEach(size => {
+  const div = document.createElement('div');
+  div.style.textAlign = 'center';
+
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+
+  const img = new Image();
+  img.onload = () => {
+    ctx.drawImage(img, 0, 0, size, size);
+
+    const preview = document.createElement('div');
+    preview.style.cssText = `width:128px;height:128px;border:1px solid #475569;border-radius:8px;display:flex;align-items:center;justify-content:center;background:#0f172a;margin-bottom:.5rem`;
+    preview.appendChild(canvas);
+    canvas.style.cssText = `width:${Math.max(64, size)}px;height:${Math.max(64, size)}px;image-rendering:pixelated`;
+
+    const label = document.createElement('div');
+    label.textContent = `icon-${size}.png (${size}x${size})`;
+    label.style.fontSize = '0.8rem';
+    label.style.color = '#94a3b8';
+    label.style.marginBottom = '.3rem';
+
+    const btn = document.createElement('a');
+    btn.textContent = 'Download';
+    btn.download = `icon-${size}.png`;
+    btn.href = canvas.toDataURL('image/png');
+    btn.style.cssText = 'display:inline-block;background:#1d4ed8;color:#fff;padding:.4rem 1rem;border-radius:6px;text-decoration:none;font-size:.8rem;cursor:pointer';
+
+    div.appendChild(preview);
+    div.appendChild(label);
+    div.appendChild(btn);
+  };
+  img.src = `icon-${size}.svg`;
+
+  container.appendChild(div);
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="128" y2="128" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#1e3a5f"/>
+      <stop offset="1" stop-color="#0f172a"/>
+    </linearGradient>
+  </defs>
+  <rect width="128" height="128" rx="24" fill="url(#bg)"/>
+  <!-- KM label -->
+  <text x="64" y="32" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="18" font-weight="700" fill="#e2e8f0">KM</text>
+  <!-- Three columns -->
+  <rect x="15" y="40" width="27" height="72" rx="4" fill="rgba(255,255,255,0.06)"/>
+  <rect x="50" y="40" width="27" height="72" rx="4" fill="rgba(255,255,255,0.06)"/>
+  <rect x="85" y="40" width="27" height="72" rx="4" fill="rgba(255,255,255,0.06)"/>
+  <!-- Cards col 1 (triage - indigo) -->
+  <rect x="18" y="44" width="21" height="13" rx="2.5" fill="#6366f1" opacity="0.85"/>
+  <rect x="18" y="61" width="21" height="13" rx="2.5" fill="#6366f1" opacity="0.85"/>
+  <!-- Cards col 2 (in progress - amber) -->
+  <rect x="53" y="44" width="21" height="13" rx="2.5" fill="#f59e0b" opacity="0.85"/>
+  <rect x="53" y="61" width="21" height="13" rx="2.5" fill="#f59e0b" opacity="0.85"/>
+  <rect x="53" y="78" width="21" height="13" rx="2.5" fill="#f59e0b" opacity="0.85"/>
+  <!-- Cards col 3 (done - green) -->
+  <rect x="88" y="44" width="21" height="13" rx="2.5" fill="#10b981" opacity="0.85"/>
+</svg>

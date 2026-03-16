@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Kanban Manager — Board</title>
+<style>
+  :root {
+    --col-triage:  #6366f1; --col-progress: #f59e0b;
+    --col-review:  #8b5cf6; --col-release:  #10b981;
+    --bg: #0f172a; --surface: #1e293b; --surface2: #334155;
+    --text: #f1f5f9; --muted: #94a3b8; --border: #334155;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); }
+
+  /* ── Header ── */
+  header {
+    background: linear-gradient(135deg,#1e3a5f,#0f172a);
+    border-bottom: 1px solid var(--border);
+    padding: 0.85rem 1.25rem;
+    display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.5rem;
+  }
+  header h1 { font-size: 1.2rem; }
+  header .subtitle { font-size: 0.72rem; color: var(--muted); }
+  .header-actions { display: flex; gap: 0.6rem; align-items: center; flex-wrap: wrap; }
+  .btn { border: none; border-radius: 6px; padding: 0.4rem 0.9rem; font-size: 0.78rem; cursor: pointer; }
+  .btn-primary { background: #1d4ed8; color: #fff; } .btn-primary:hover { background: #2563eb; }
+  .btn-ghost { background: var(--surface2); color: var(--muted); } .btn-ghost:hover { color: var(--text); }
+  .spinning { animation: spin 1s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  #last-updated { font-size: 0.7rem; color: var(--muted); }
+
+  /* ── Error / Loading ── */
+  .banner { margin: 0.75rem 1.25rem; padding: 0.5rem 0.85rem; border-radius: 8px; font-size: 0.78rem; display: none; }
+  .banner.err { background: rgba(239,68,68,.1); border: 1px solid rgba(239,68,68,.3); color: #fca5a5; display: block; }
+  .banner.info { background: rgba(59,130,246,.1); border: 1px solid rgba(59,130,246,.3); color: #93c5fd; display: block; }
+
+  /* ── Filters ── */
+  .filters {
+    background: var(--surface); border-bottom: 1px solid var(--border);
+    padding: 0.5rem 1.25rem; display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap;
+  }
+  .filter-label { font-size: 0.7rem; color: var(--muted); }
+  .filter-btn {
+    background: var(--surface2); color: var(--muted); border: 1px solid var(--border);
+    padding: 0.25rem 0.65rem; border-radius: 20px; font-size: 0.72rem; cursor: pointer;
+  }
+  .filter-btn:hover, .filter-btn.active { background: #1d4ed8; color: #fff; border-color: #1d4ed8; }
+  .search-input {
+    background: var(--surface2); color: var(--text); border: 1px solid var(--border);
+    padding: 0.25rem 0.65rem; border-radius: 20px; font-size: 0.72rem;
+    outline: none; width: 200px; transition: border-color .15s;
+  }
+  .search-input:focus { border-color: #3b82f6; }
+  .search-input::placeholder { color: var(--muted); }
+
+  /* ── Stats row ── */
+  .stats-row { display: flex; gap: 0.75rem; padding: 0.75rem 1.25rem; flex-wrap: wrap; }
+  .stat-card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+    padding: 0.7rem 1rem; flex: 1; min-width: 110px;
+  }
+  .stat-card .label { font-size: 0.62rem; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin-bottom: .25rem; }
+  .stat-card .value { font-size: 1.6rem; font-weight: 700; line-height: 1; }
+  .stat-card .sub { font-size: 0.65rem; color: var(--muted); margin-top: .2rem; }
+
+  /* ── Team load ── */
+  .team-row { display: flex; gap: 0.6rem; padding: 0 1.25rem 0.75rem; flex-wrap: wrap; }
+  .team-card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+    padding: 0.6rem 0.85rem; display: flex; align-items: center; gap: 0.6rem; flex: 1; min-width: 180px;
+  }
+  .avatar { width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 0.7rem; font-weight: 700; color:#fff; flex-shrink:0; }
+  .t-name { font-size: 0.78rem; font-weight: 600; }
+  .t-sub { font-size: 0.65rem; color: var(--muted); margin-top: .1rem; }
+  .wip-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-left: 2px; vertical-align: middle; }
+
+  /* ── Board ── */
+  .section-label { padding: .4rem 1.25rem; font-size: .68rem; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); border-top: 1px solid var(--border); }
+  .board { display: flex; gap: 0; padding: 0 .75rem 1.5rem; overflow-x: auto; }
+  .column { flex: 1; min-width: 260px; margin: 0 .4rem; display: flex; flex-direction: column; }
+  .col-header { display: flex; align-items: center; justify-content: space-between; padding: .6rem .4rem .4rem; }
+  .col-title { display: flex; align-items: center; gap: .4rem; font-size: .75rem; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; }
+  .col-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+  .col-count { background: var(--surface2); color: var(--muted); border-radius: 12px; padding: .1rem .5rem; font-size: .7rem; font-weight: 600; }
+  .col-body { display: flex; flex-direction: column; gap: .4rem; }
+
+  /* ── Cards ── */
+  a.card {
+    background: var(--surface); border: 1px solid var(--border); border-left: 3px solid var(--border);
+    border-radius: 7px; padding: .6rem .75rem; display: block; text-decoration: none; color: inherit;
+    transition: transform .1s, box-shadow .1s;
+  }
+  a.card:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(0,0,0,.4); }
+  a.card.type-bug { border-left-color: #ef4444; } a.card.type-story { border-left-color: #3b82f6; }
+  a.card.hidden { display: none; }
+  a.card.dragging { opacity: 0.4; }
+  a.card.saving { opacity: 0.6; pointer-events: none; }
+  .drop-indicator { height: 3px; background: #3b82f6; border-radius: 2px; margin: 2px 0; }
+  .col-body.drag-over { background: rgba(59,130,246,.05); border-radius: 6px; }
+  .card-top { display: flex; justify-content: space-between; align-items: flex-start; gap: .4rem; margin-bottom: .35rem; }
+  .card-id { font-size: .67rem; color: #60a5fa; font-weight: 600; white-space: nowrap; }
+  .card-badges { display: flex; gap: .25rem; flex-wrap: wrap; justify-content: flex-end; }
+  .badge { font-size: .58rem; padding: .08rem .35rem; border-radius: 3px; font-weight: 600; white-space: nowrap; }
+  .badge-bug { background: rgba(239,68,68,.15); color: #fca5a5; border: 1px solid rgba(239,68,68,.3); }
+  .badge-story { background: rgba(59,130,246,.15); color: #93c5fd; border: 1px solid rgba(59,130,246,.3); }
+  .badge-sp { background: rgba(148,163,184,.1); color: var(--muted); border: 1px solid var(--border); }
+  .badge-p1 { background: rgba(239,68,68,.2); color: #fca5a5; border: 1px solid rgba(239,68,68,.3); }
+  .badge-p2 { background: rgba(245,158,11,.1); color: #fcd34d; border: 1px solid rgba(245,158,11,.3); }
+  .badge-p3 { background: rgba(148,163,184,.1); color: var(--muted); border: 1px solid var(--border); }
+  .card-title { font-size: .74rem; line-height: 1.4; color: #e2e8f0; margin-bottom: .4rem; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+  .card-footer { display: flex; justify-content: space-between; align-items: center; margin-top: .35rem; }
+  .card-assignee { display: flex; align-items: center; gap: .3rem; font-size: .67rem; color: var(--muted); }
+  .mini-avatar { width: 16px; height: 16px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: .5rem; font-weight: 700; color:#fff; flex-shrink:0; }
+  .age-pill { font-size: .62rem; padding: .08rem .4rem; border-radius: 10px; font-weight: 600; white-space: nowrap; }
+  .age-ok { background: rgba(34,197,94,.15); color: #86efac; }
+  .age-warn { background: rgba(245,158,11,.15); color: #fcd34d; }
+  .age-old { background: rgba(239,68,68,.15); color: #fca5a5; }
+  .card-tags { display: flex; flex-wrap: wrap; gap: .2rem; margin-top: .3rem; }
+  .tag { font-size: .56rem; background: rgba(99,102,241,.12); color: #a5b4fc; border: 1px solid rgba(99,102,241,.25); padding: .05rem .3rem; border-radius: 3px; }
+
+  /* ── Flow metrics ── */
+  .metrics-section {
+    margin: .35rem 1.25rem .5rem;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: .5rem .75rem;
+  }
+  .metrics-section h2 { font-size: .82rem; font-weight: 700; margin-bottom: .35rem; color: #e2e8f0; }
+  .metrics-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: .5rem; }
+  .metric-chart h3 { font-size: .68rem; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin-bottom: .2rem; }
+  .metric-kpis { display: flex; gap: .5rem; margin-bottom: .25rem; flex-wrap: wrap; }
+  .kpi { }
+  .kpi .kv { font-size: 1rem; font-weight: 700; line-height: 1; }
+  .kpi .kl { font-size: .58rem; color: var(--muted); margin-top: .05rem; }
+  .trend-badge { font-size: .68rem; padding: .1rem .45rem; border-radius: 10px; font-weight: 600; }
+  .trend-up-bad { background: rgba(239,68,68,.15); color: #fca5a5; }
+  .trend-down-good { background: rgba(34,197,94,.15); color: #86efac; }
+  .trend-up-good { background: rgba(34,197,94,.15); color: #86efac; }
+  .trend-neutral { background: rgba(148,163,184,.1); color: var(--muted); }
+
+  /* ── Tab bar ── */
+  .tab-bar {
+    background: var(--surface); border-bottom: 1px solid var(--border);
+    padding: 0 1.25rem; display: flex; align-items: flex-end; gap: 0; overflow-x: auto;
+  }
+  .tab-btn {
+    background: none; border: none; border-bottom: 3px solid transparent;
+    color: var(--muted); padding: 0.65rem 1rem 0.5rem; font-size: 0.8rem;
+    cursor: pointer; white-space: nowrap; display: flex; align-items: center; gap: 0.4rem;
+    transition: color .15s, border-color .15s;
+  }
+  .tab-btn:hover { color: var(--text); }
+  .tab-btn.active { color: var(--text); border-bottom-color: #3b82f6; font-weight: 600; }
+  .tab-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+
+  /* ── Tab panels ── */
+  .tab-panel { display: none; }
+  .tab-panel.active { display: block; }
+
+  /* ── Overview pod grid ── */
+  .overview-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 0.6rem; padding: .6rem 1.25rem; }
+  .pod-card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+    border-top: 3px solid var(--border); padding: .7rem .9rem;
+    cursor: pointer; transition: transform .12s, box-shadow .12s;
+  }
+  .pod-card:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(0,0,0,.4); }
+  .pod-card-name { font-size: .92rem; font-weight: 700; margin-bottom: 0.45rem; }
+  .pod-card-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 0.35rem; margin-bottom: 0.45rem; }
+  .pod-stat { background: var(--bg); border-radius: 6px; padding: 0.3rem 0.45rem; }
+  .pod-stat .ps-label { font-size: 0.58rem; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+  .pod-stat .ps-val { font-size: 1.1rem; font-weight: 700; line-height: 1.1; }
+  .pod-card-footer { display: flex; justify-content: space-between; align-items: center; }
+  .pod-arr { font-size: 0.72rem; color: var(--muted); }
+  .pod-err { font-size: 0.68rem; color: #fca5a5; background: rgba(239,68,68,.1); padding: .15rem .4rem; border-radius: 4px; }
+
+  /* ── Collapsible pod blocks ── */
+  .pod-block-header {
+    display: flex; align-items: center; justify-content: space-between;
+    cursor: pointer; user-select: none; margin-bottom: .3rem;
+  }
+  .pod-block-header .pod-toggle { font-size: .7rem; color: var(--muted); transition: transform .15s; }
+  .pod-block-header .pod-toggle.collapsed { transform: rotate(-90deg); }
+  .pod-block-body { overflow: hidden; transition: max-height .2s ease; }
+  .pod-block-body.collapsed { max-height: 0 !important; overflow: hidden; }
+
+  /* ── Chart tooltips ── */
+  .chart-title { display: flex; align-items: center; gap: .35rem; font-size: .68rem; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin-bottom: .2rem; }
+  .chart-info {
+    position: relative; display: inline-flex; align-items: center; justify-content: center;
+    width: 14px; height: 14px; border-radius: 50%; background: var(--surface2); color: var(--muted);
+    font-size: .6rem; font-weight: 700; cursor: help; flex-shrink: 0; line-height: 1;
+  }
+  .chart-info:hover { background: #475569; color: #e2e8f0; }
+  .chart-info .chart-tip {
+    display: none; position: absolute; bottom: calc(100% + 6px); left: 50%; transform: translateX(-50%);
+    background: #1e293b; border: 1px solid #475569; border-radius: 6px; padding: .45rem .6rem;
+    font-size: .68rem; font-weight: 400; text-transform: none; letter-spacing: 0;
+    color: #cbd5e1; white-space: normal; width: 240px; z-index: 100;
+    box-shadow: 0 4px 12px rgba(0,0,0,.5); line-height: 1.4;
+  }
+  .chart-info:hover .chart-tip { display: block; }
+
+  /* ── Cycle time / burndown charts ── */
+  .chart-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: .5rem; }
+  .pi-selector { background: var(--surface2); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: .3rem .6rem; font-size: .75rem; }
+  .pi-selector:focus { border-color: #3b82f6; outline: none; }
+
+  @media (max-width: 900px) { .metrics-grid { grid-template-columns: 1fr 1fr; } .chart-row { grid-template-columns: 1fr 1fr; } }
+  @media (max-width: 600px) { .metrics-grid { grid-template-columns: 1fr; } .chart-row { grid-template-columns: 1fr; } }
+  footer { text-align: center; padding: .75rem; font-size: .68rem; color: var(--muted); border-top: 1px solid var(--border); }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>🗂 Kanban Manager</h1>
+    <div class="subtitle" id="header-subtitle">Multi-pod overview</div>
+  </div>
+  <div class="header-actions">
+    <span id="last-updated"></span>
+    <button class="btn btn-ghost" id="refresh-btn">↻ Refresh</button>
+    <button class="btn btn-ghost" id="settings-btn">⚙ Settings</button>
+  </div>
+</header>
+
+<div id="banner" class="banner"></div>
+
+<!-- Tab bar — built by JS -->
+<div class="tab-bar" id="tab-bar" style="display:none"></div>
+
+<!-- All panels injected by JS into this container -->
+<div id="panels-container"></div>
+
+<footer>Data from Azure DevOps · Auto-refreshes every <span id="refresh-interval">15</span> min</footer>
+
+<script src="shared.js"></script>
+<script src="board.js"></script>
+</body>
+</html>

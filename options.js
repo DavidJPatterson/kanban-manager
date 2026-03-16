@@ -1,0 +1,185 @@
+// options.js
+
+const POD_PALETTE = ['#6366f1','#f59e0b','#10b981','#8b5cf6','#ef4444','#06b6d4','#f97316','#84cc16'];
+
+function $(id) { return document.getElementById(id); }
+
+function setStatus(msg, ok) {
+  const el = $('status');
+  el.textContent = msg;
+  el.className = 'status ' + (ok ? 'ok' : 'err');
+  setTimeout(() => { el.textContent = ''; el.className = 'status'; }, 5000);
+}
+
+function podColorForIndex(i) {
+  return POD_PALETTE[i % POD_PALETTE.length];
+}
+
+// ─── Pod list rendering ───────────────────────────────────────────────────────
+
+function renderPodList(pods) {
+  const list = $('pods-list');
+  list.innerHTML = '';
+  pods.forEach((pod, i) => {
+    const color = podColorForIndex(i);
+    const row = document.createElement('div');
+    row.className = 'pod-row';
+    row.dataset.podId = pod.id;
+    row.innerHTML = `
+      <div class="pod-color-dot" style="background:${color}"></div>
+      <input class="pod-name-input" type="text" placeholder="Pod name" value="${escAttr(pod.name)}" data-field="name" />
+      <input class="pod-path-input" type="text" placeholder="Platform\\Team\\Pod X" value="${escAttr(pod.areaPath)}" data-field="areaPath" />
+      <button class="pod-remove-btn" title="Remove pod">✕</button>
+    `;
+    row.querySelector('.pod-remove-btn').addEventListener('click', () => {
+      row.remove();
+    });
+    list.appendChild(row);
+  });
+}
+
+function escAttr(s) {
+  return (s || '').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+}
+
+function readPods() {
+  return Array.from($('pods-list').querySelectorAll('.pod-row')).map(row => ({
+    id: row.dataset.podId || ('pod-' + Date.now().toString(36)),
+    name: row.querySelector('[data-field="name"]').value.trim(),
+    areaPath: row.querySelector('[data-field="areaPath"]').value.trim()
+  })).filter(p => p.name && p.areaPath);
+}
+
+// ─── Load settings ────────────────────────────────────────────────────────────
+
+document.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('save-btn').addEventListener('click', save);
+  document.getElementById('test-btn').addEventListener('click', testConnection);
+  document.getElementById('add-pod-btn').addEventListener('click', () => {
+    const list = $('pods-list');
+    const idx = list.children.length;
+    const color = podColorForIndex(idx);
+    const row = document.createElement('div');
+    row.className = 'pod-row';
+    row.dataset.podId = 'pod-' + Date.now().toString(36);
+    row.innerHTML = `
+      <div class="pod-color-dot" style="background:${color}"></div>
+      <input class="pod-name-input" type="text" placeholder="Pod name" data-field="name" />
+      <input class="pod-path-input" type="text" placeholder="Platform\\Team\\Pod X" data-field="areaPath" />
+      <button class="pod-remove-btn" title="Remove pod">✕</button>
+    `;
+    row.querySelector('.pod-remove-btn').addEventListener('click', () => row.remove());
+    list.appendChild(row);
+    row.querySelector('.pod-name-input').focus();
+  });
+
+  chrome.storage.local.get('settings', result => {
+    let s = result.settings || {};
+    // Migrate old single-areaPath format
+    if (s.areaPath && (!s.pods || s.pods.length === 0)) {
+      s.pods = [{ id: 'pod-migrated', name: 'Pod 1', areaPath: s.areaPath }];
+    }
+    $('org').value = s.org || 'amcsgroup';
+    $('project').value = s.project || 'Platform';
+    $('pat').value = s.pat || '';
+    $('refreshInterval').value = String(s.refreshInterval || 15);
+    renderPodList(s.pods || []);
+
+    // Overview chart toggles
+    const oc = s.overviewCharts || {};
+    $('ct-in-progress').checked = !!oc.cycleTimeInProgress;
+    $('ct-arrival').checked = !!oc.cycleTimeArrival;
+    $('tp-by-person').checked = !!oc.throughputByPerson;
+    $('ct-by-person').checked = !!oc.cycleTimeByPerson;
+    $('resolved-by-person').checked = !!oc.resolvedByPerson;
+    $('burndown-pi').checked = !!oc.burndownByPI;
+    $('wip-trend').checked = !!oc.wipTrend;
+    $('age-distribution').checked = !!oc.ageDistribution;
+    $('flow-efficiency').checked = !!oc.flowEfficiency;
+    $('stale-items').checked = !!oc.staleItems;
+    $('bug-ratio-trend').checked = !!oc.bugRatioTrend;
+    $('tp-predictability').checked = !!oc.throughputPredictability;
+  });
+});
+
+// ─── Save ─────────────────────────────────────────────────────────────────────
+
+function save() {
+  const pods = readPods();
+  const settings = {
+    org: $('org').value.trim(),
+    project: $('project').value.trim(),
+    pat: $('pat').value.trim(),
+    refreshInterval: parseInt($('refreshInterval').value, 10),
+    pods,
+    overviewCharts: {
+      cycleTimeInProgress: $('ct-in-progress').checked,
+      cycleTimeArrival: $('ct-arrival').checked,
+      throughputByPerson: $('tp-by-person').checked,
+      cycleTimeByPerson: $('ct-by-person').checked,
+      resolvedByPerson: $('resolved-by-person').checked,
+      burndownByPI: $('burndown-pi').checked,
+      wipTrend: $('wip-trend').checked,
+      ageDistribution: $('age-distribution').checked,
+      flowEfficiency: $('flow-efficiency').checked,
+      staleItems: $('stale-items').checked,
+      bugRatioTrend: $('bug-ratio-trend').checked,
+      throughputPredictability: $('tp-predictability').checked
+    }
+  };
+
+  if (!settings.org || !settings.project) {
+    setStatus('Organisation and Project are required.', false); return;
+  }
+  if (!settings.pat) {
+    setStatus('A Personal Access Token is required.', false); return;
+  }
+  if (!pods.length) {
+    setStatus('Add at least one pod to track.', false); return;
+  }
+
+  chrome.storage.local.set({ settings }, () => {
+    setStatus(`Saved ${pods.length} pod${pods.length !== 1 ? 's' : ''}. Triggering refresh…`, true);
+    chrome.storage.local.remove(['cachedData', 'arrivedAtCache'], () => {
+      chrome.runtime.sendMessage({ type: 'REFRESH' });
+    });
+  });
+}
+
+// ─── Test connection ──────────────────────────────────────────────────────────
+
+async function testConnection() {
+  const pods = readPods();
+  const org = $('org').value.trim();
+  const project = $('project').value.trim();
+  const pat = $('pat').value.trim();
+
+  const resultEl = $('test-result');
+  resultEl.style.display = 'block';
+  resultEl.style.color = '#94a3b8';
+
+  if (!pat) { resultEl.textContent = '❌ Enter a PAT first.'; return; }
+  if (!pods.length) { resultEl.textContent = '❌ Add at least one pod first.'; return; }
+
+  resultEl.textContent = `Testing ${pods.length} pod${pods.length !== 1 ? 's' : ''}…`;
+
+  const lines = [];
+  for (const pod of pods) {
+    try {
+      const url = `https://dev.azure.com/${org}/${project}/_apis/wit/wiql?api-version=7.1`;
+      const resp = await fetch(url, {
+        method: 'POST',
+        headers: { 'Authorization': `Basic ${btoa(':' + pat)}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query: `SELECT [System.Id] FROM WorkItems WHERE [System.AreaPath] UNDER '${pod.areaPath}' AND [System.State] NOT IN ('Closed','Removed')` })
+      });
+      if (!resp.ok) { lines.push(`❌ ${pod.name}: HTTP ${resp.status}`); continue; }
+      const data = await resp.json();
+      lines.push(`✅ ${pod.name}: ${(data.workItems || []).length} active items`);
+    } catch (err) {
+      lines.push(`❌ ${pod.name}: ${err.message}`);
+    }
+  }
+
+  resultEl.textContent = lines.join('\n');
+  resultEl.style.color = lines.every(l => l.startsWith('✅')) ? '#22c55e' : '#fcd34d';
+}

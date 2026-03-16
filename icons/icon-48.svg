@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="48" y2="48" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#1e3a5f"/>
+      <stop offset="1" stop-color="#0f172a"/>
+    </linearGradient>
+  </defs>
+  <rect width="48" height="48" rx="9" fill="url(#bg)"/>
+  <!-- KM label -->
+  <text x="24" y="13" text-anchor="middle" font-family="-apple-system,sans-serif" font-size="7" font-weight="700" fill="#e2e8f0">KM</text>
+  <!-- Three columns -->
+  <rect x="6" y="16" width="10" height="26" rx="1.5" fill="rgba(255,255,255,0.06)"/>
+  <rect x="19" y="16" width="10" height="26" rx="1.5" fill="rgba(255,255,255,0.06)"/>
+  <rect x="32" y="16" width="10" height="26" rx="1.5" fill="rgba(255,255,255,0.06)"/>
+  <!-- Cards col 1 -->
+  <rect x="7.2" y="17.5" width="7.6" height="5" rx="1" fill="#6366f1" opacity="0.85"/>
+  <rect x="7.2" y="24" width="7.6" height="5" rx="1" fill="#6366f1" opacity="0.85"/>
+  <!-- Cards col 2 -->
+  <rect x="20.2" y="17.5" width="7.6" height="5" rx="1" fill="#f59e0b" opacity="0.85"/>
+  <rect x="20.2" y="24" width="7.6" height="5" rx="1" fill="#f59e0b" opacity="0.85"/>
+  <rect x="20.2" y="30.5" width="7.6" height="5" rx="1" fill="#f59e0b" opacity="0.85"/>
+  <!-- Cards col 3 -->
+  <rect x="33.2" y="17.5" width="7.6" height="5" rx="1" fill="#10b981" opacity="0.85"/>
+</svg>
