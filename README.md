@@ -41,7 +41,7 @@ All data stays on your machine. The extension only communicates with `dev.azure.
 ## Support
 
 - **Issues & feature requests**: [GitHub Issues](https://github.com/DavidJPatterson/kanban-manager/issues)
-- **Consulting & custom development**: Contact [your email here]
+- **Consulting & custom development**: [pattersondavid74+kanban@gmail.com](mailto:pattersondavid74+kanban@gmail.com)
 - **Sponsor this project**: [GitHub Sponsors](https://github.com/sponsors/DavidJPatterson)
 
 ## License
