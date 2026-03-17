@@ -1,7 +1,5 @@
 // options.js
 
-const POD_PALETTE = ['#6366f1','#f59e0b','#10b981','#8b5cf6','#ef4444','#06b6d4','#f97316','#84cc16'];
-
 function $(id) { return document.getElementById(id); }
 
 function setStatus(msg, ok) {
@@ -53,26 +51,7 @@ function readPods() {
 // ─── Load settings ────────────────────────────────────────────────────────────
 
 document.addEventListener('DOMContentLoaded', () => {
-  document.getElementById('save-btn').addEventListener('click', save);
-  document.getElementById('test-btn').addEventListener('click', testConnection);
-  document.getElementById('add-pod-btn').addEventListener('click', () => {
-    const list = $('pods-list');
-    const idx = list.children.length;
-    const color = podColorForIndex(idx);
-    const row = document.createElement('div');
-    row.className = 'pod-row';
-    row.dataset.podId = 'pod-' + Date.now().toString(36);
-    row.innerHTML = `
-      <div class="pod-color-dot" style="background:${color}"></div>
-      <input class="pod-name-input" type="text" placeholder="Pod name" data-field="name" />
-      <input class="pod-path-input" type="text" placeholder="Platform\\Team\\Pod X" data-field="areaPath" />
-      <button class="pod-remove-btn" title="Remove pod">✕</button>
-    `;
-    row.querySelector('.pod-remove-btn').addEventListener('click', () => row.remove());
-    list.appendChild(row);
-    row.querySelector('.pod-name-input').focus();
-  });
-
+  // Load saved settings first — this is the critical path
   chrome.storage.local.get('settings', result => {
     let s = result.settings || {};
     // Migrate old single-areaPath format
@@ -101,6 +80,34 @@ document.addEventListener('DOMContentLoaded', () => {
     $('tp-predictability').checked = !!oc.throughputPredictability;
     $('priority-age-dist').checked = !!oc.priorityAgeDistribution;
     $('cfd-chart').checked = !!oc.cfdChart;
+  });
+
+  document.getElementById('save-btn').addEventListener('click', save);
+  document.getElementById('test-btn').addEventListener('click', testConnection);
+
+  // Theme toggle (guarded in case shared.js hasn't loaded yet)
+  const themeBtn = document.getElementById('theme-btn')
+  if (typeof initTheme === 'function') {
+    initTheme().then(t => { themeBtn.textContent = t === 'dark' ? '☀' : '☾' })
+    themeBtn.addEventListener('click', () => toggleTheme().then(t => { themeBtn.textContent = t === 'dark' ? '☀' : '☾' }))
+  }
+
+  document.getElementById('add-pod-btn').addEventListener('click', () => {
+    const list = $('pods-list');
+    const idx = list.children.length;
+    const color = podColorForIndex(idx);
+    const row = document.createElement('div');
+    row.className = 'pod-row';
+    row.dataset.podId = 'pod-' + Date.now().toString(36);
+    row.innerHTML = `
+      <div class="pod-color-dot" style="background:${color}"></div>
+      <input class="pod-name-input" type="text" placeholder="Pod name" data-field="name" />
+      <input class="pod-path-input" type="text" placeholder="Platform\\Team\\Pod X" data-field="areaPath" />
+      <button class="pod-remove-btn" title="Remove pod">✕</button>
+    `;
+    row.querySelector('.pod-remove-btn').addEventListener('click', () => row.remove());
+    list.appendChild(row);
+    row.querySelector('.pod-name-input').focus();
   });
 });
 

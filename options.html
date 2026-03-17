@@ -4,35 +4,57 @@
 <meta charset="UTF-8">
 <title>Kanban Manager — Settings</title>
 <style>
+  :root {
+    --bg: #0f172a; --surface: #1e293b; --surface2: #334155;
+    --text: #f1f5f9; --muted: #94a3b8; --border: #334155;
+    --input-bg: #0f172a; --accent: #1d4ed8; --accent-hover: #2563eb;
+  }
+  [data-theme="light"] {
+    --bg: #f1f5f9; --surface: #ffffff; --surface2: #e2e8f0;
+    --text: #0f172a; --muted: #64748b; --border: #cbd5e1;
+    --input-bg: #f8fafc; --accent: #2563eb; --accent-hover: #3b82f6;
+  }
   * { box-sizing: border-box; margin: 0; padding: 0; }
+  :focus-visible { outline: 2px solid #3b82f6; outline-offset: 2px; }
   body {
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-    background: #0f172a; color: #f1f5f9;
+    background: var(--bg); color: var(--text);
     min-height: 100vh; display: flex; align-items: flex-start;
     justify-content: center; padding: 2rem 1rem;
   }
   .card {
-    background: #1e293b; border: 1px solid #334155;
-    border-radius: 12px; padding: 2rem; width: 100%; max-width: 600px;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 12px; padding: 2rem; width: 100%; max-width: 960px;
   }
-  h1 { font-size: 1.2rem; margin-bottom: 0.25rem; }
-  .sub { font-size: 0.8rem; color: #64748b; margin-bottom: 1.5rem; }
+  .settings-grid {
+    display: grid; grid-template-columns: 1fr; gap: 0;
+  }
+  @media (min-width: 800px) {
+    .settings-grid {
+      grid-template-columns: 1fr 1fr; gap: 2rem;
+      align-items: start;
+    }
+    .settings-grid .section-sep { display: none; }
+    .settings-footer { grid-column: 1 / -1; }
+  }
+  h1 { font-size: 1.25rem; margin-bottom: 0.25rem; }
+  .sub { font-size: 0.875rem; color: var(--muted); margin-bottom: 1.5rem; }
   .field { margin-bottom: 1.25rem; }
   .field-row { display: flex; gap: 0.75rem; }
   .field-row .field { flex: 1; margin-bottom: 0; }
-  label { display: block; font-size: 0.78rem; color: #94a3b8; margin-bottom: 0.4rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
+  label { display: block; font-size: 0.75rem; color: var(--muted); margin-bottom: 0.4rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
   input, select {
-    width: 100%; background: #0f172a; border: 1px solid #334155;
-    color: #f1f5f9; border-radius: 8px; padding: 0.6rem 0.85rem;
+    width: 100%; background: var(--input-bg); border: 1px solid var(--border);
+    color: var(--text); border-radius: 8px; padding: 0.6rem 0.85rem;
     font-size: 0.9rem; outline: none; transition: border-color 0.15s;
   }
   input:focus, select:focus { border-color: #3b82f6; }
-  .hint { font-size: 0.72rem; color: #64748b; margin-top: 0.35rem; }
+  .hint { font-size: 0.75rem; color: var(--muted); margin-top: 0.35rem; }
   .hint a { color: #60a5fa; }
-  .section-sep { border-top: 1px solid #334155; margin: 1.5rem 0; }
+  .section-sep { border-top: 1px solid var(--border); margin: 1.5rem 0; }
   .section-title {
-    font-size: 0.78rem; font-weight: 700; text-transform: uppercase;
-    letter-spacing: 0.05em; color: #94a3b8; margin-bottom: 0.75rem;
+    font-size: 0.75rem; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.05em; color: var(--muted); margin-bottom: 0.75rem;
     display: flex; align-items: center; justify-content: space-between;
   }
 
@@ -40,21 +62,21 @@
   #pods-list { display: flex; flex-direction: column; gap: 0.6rem; margin-bottom: 0.75rem; }
   .pod-row {
     display: flex; align-items: center; gap: 0.5rem;
-    background: #0f172a; border: 1px solid #334155; border-radius: 8px; padding: 0.5rem 0.6rem;
+    background: var(--input-bg); border: 1px solid var(--border); border-radius: 8px; padding: 0.5rem 0.6rem;
   }
   .pod-color-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
-  .pod-row input { background: transparent; border: none; padding: 0.2rem 0.4rem; font-size: 0.85rem; }
+  .pod-row input { background: transparent; border: none; padding: 0.2rem 0.4rem; font-size: 0.875rem; }
   .pod-row input:focus { border-bottom: 1px solid #3b82f6; outline: none; }
-  .pod-name-input { width: 140px; flex-shrink: 0; color: #e2e8f0; font-weight: 600; }
-  .pod-path-input { flex: 1; color: #94a3b8; font-family: monospace; font-size: 0.8rem; }
+  .pod-name-input { width: 140px; flex-shrink: 0; color: var(--text); font-weight: 600; }
+  .pod-path-input { flex: 1; color: var(--muted); font-family: monospace; font-size: 0.75rem; }
   .pod-remove-btn {
-    background: none; border: none; color: #475569; cursor: pointer;
+    background: none; border: none; color: var(--muted); cursor: pointer;
     font-size: 1rem; padding: 0.1rem 0.3rem; border-radius: 4px; flex-shrink: 0;
   }
   .pod-remove-btn:hover { color: #ef4444; background: rgba(239,68,68,.1); }
   .add-pod-btn {
     background: rgba(59,130,246,.1); color: #60a5fa; border: 1px dashed rgba(59,130,246,.3);
-    border-radius: 8px; padding: 0.45rem 1rem; font-size: 0.8rem; cursor: pointer; width: 100%;
+    border-radius: 8px; padding: 0.45rem 1rem; font-size: 0.75rem; cursor: pointer; width: 100%;
   }
   .add-pod-btn:hover { background: rgba(59,130,246,.2); }
 
@@ -63,146 +85,161 @@
   .chart-toggle {
     display: flex; align-items: center; gap: 0.5rem;
     text-transform: none; letter-spacing: 0; font-weight: 400;
-    font-size: 0.82rem; cursor: pointer; margin-bottom: 0;
+    font-size: 0.875rem; cursor: pointer; margin-bottom: 0;
     white-space: nowrap;
   }
   .chart-toggle input[type="checkbox"] { width: auto; flex-shrink: 0; margin: 0; }
-  .toggle-note { color: #64748b; font-size: 0.7rem; }
+  .toggle-note { color: var(--muted); font-size: 0.75rem; }
 
   /* Actions */
   .actions { display: flex; gap: 0.75rem; margin-top: 1.5rem; flex-wrap: wrap; }
   .btn-primary {
-    background: #1d4ed8; color: #fff; border: none; border-radius: 8px;
+    background: var(--accent); color: #fff; border: none; border-radius: 8px;
     padding: 0.65rem 1.5rem; font-size: 0.9rem; cursor: pointer; font-weight: 600;
   }
-  .btn-primary:hover { background: #2563eb; }
+  .btn-primary:hover { background: var(--accent-hover); }
   .btn-secondary {
-    background: #334155; color: #94a3b8; border: none; border-radius: 8px;
+    background: var(--surface2); color: var(--muted); border: none; border-radius: 8px;
     padding: 0.65rem 1.25rem; font-size: 0.9rem; cursor: pointer;
   }
-  .btn-secondary:hover { background: #475569; color: #f1f5f9; }
-  .status { font-size: 0.8rem; margin-top: 0.75rem; min-height: 1.2em; }
+  .btn-secondary:hover { background: var(--border); color: var(--text); }
+  .status { font-size: 0.875rem; margin-top: 0.75rem; min-height: 1.2em; }
   .status.ok { color: #22c55e; } .status.err { color: #ef4444; }
   .test-result {
-    background: #0f172a; border: 1px solid #334155; border-radius: 8px;
-    padding: 0.75rem; font-size: 0.78rem; color: #94a3b8; margin-top: 0.75rem;
+    background: var(--input-bg); border: 1px solid var(--border); border-radius: 8px;
+    padding: 0.75rem; font-size: 0.75rem; color: var(--muted); margin-top: 0.75rem;
     white-space: pre-wrap; display: none;
   }
 </style>
 </head>
 <body>
 <div class="card">
-  <h1>Kanban Manager — Settings</h1>
-  <p class="sub">Configure your Azure DevOps connection, pods, and refresh preferences.</p>
-
-  <div class="field-row">
-    <div class="field">
-      <label>Organisation</label>
-      <input id="org" type="text" placeholder="e.g. amcsgroup" />
+  <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:.25rem">
+    <div>
+      <h1>Kanban Manager — Settings</h1>
+      <p class="sub" style="margin-bottom:0">Configure your Azure DevOps connection, pods, and refresh preferences.</p>
     </div>
-    <div class="field">
-      <label>Project</label>
-      <input id="project" type="text" placeholder="e.g. Platform" />
+    <button class="btn-secondary" id="theme-btn" title="Toggle light/dark mode (Ctrl+Shift+T)" style="flex-shrink:0;padding:.4rem .7rem;font-size:.85rem">☀</button>
+  </div>
+
+  <div class="settings-grid">
+    <!-- Left column: Connection settings -->
+    <div>
+      <div class="field-row">
+        <div class="field">
+          <label>Organisation</label>
+          <input id="org" type="text" placeholder="e.g. amcsgroup" />
+        </div>
+        <div class="field">
+          <label>Project</label>
+          <input id="project" type="text" placeholder="e.g. Platform" />
+        </div>
+      </div>
+
+      <div class="field" style="margin-top:1.25rem">
+        <label>Personal Access Token (PAT)</label>
+        <input id="pat" type="password" placeholder="Your ADO PAT" autocomplete="off" />
+        <p class="hint">
+          Required scope: <strong>Work Items (Read, Write)</strong> ·
+          <a href="https://dev.azure.com/amcsgroup/_usersSettings/tokens" target="_blank">Generate PAT →</a>
+        </p>
+      </div>
+
+      <div class="field">
+        <label>Auto-refresh interval</label>
+        <select id="refreshInterval">
+          <option value="5">Every 5 minutes</option>
+          <option value="10">Every 10 minutes</option>
+          <option value="15" selected>Every 15 minutes</option>
+          <option value="30">Every 30 minutes</option>
+          <option value="60">Every hour</option>
+        </select>
+      </div>
+
+      <div class="section-sep"></div>
+
+      <div class="section-title">
+        <span>Pods / Teams</span>
+      </div>
+      <p class="hint" style="margin-bottom:0.75rem">Each pod maps to an ADO area path. Add one row per team you want to track.</p>
+      <div id="pods-list"></div>
+      <button class="add-pod-btn" id="add-pod-btn">+ Add Pod</button>
     </div>
-  </div>
 
-  <div class="field" style="margin-top:1.25rem">
-    <label>Personal Access Token (PAT)</label>
-    <input id="pat" type="password" placeholder="Your ADO PAT" autocomplete="off" />
-    <p class="hint">
-      Required scope: <strong>Work Items (Read, Write)</strong> ·
-      <a href="https://dev.azure.com/amcsgroup/_usersSettings/tokens" target="_blank">Generate PAT →</a>
-    </p>
-  </div>
+    <!-- Right column: Charts -->
+    <div>
+      <div class="section-title">
+        <span>Overview Charts</span>
+      </div>
+      <p class="hint" style="margin-bottom:0.75rem">Enable optional charts on the overview dashboard.</p>
+      <div class="chart-toggles">
+        <label class="chart-toggle">
+          <input type="checkbox" checked disabled /> Arrival Rate &amp; Throughput <span class="toggle-note">(always on)</span>
+        </label>
+        <label class="chart-toggle">
+          <input type="checkbox" id="ct-in-progress" /> Cycle Time (In Progress &rarr; Closed)
+        </label>
+        <label class="chart-toggle">
+          <input type="checkbox" id="ct-arrival" /> Cycle Time (Arrival &rarr; Closed)
+        </label>
+        <label class="chart-toggle">
+          <input type="checkbox" id="tp-by-person" /> Throughput per Person per Week
+        </label>
+        <label class="chart-toggle">
+          <input type="checkbox" id="ct-by-person" /> Items Closed by Person
+        </label>
+        <label class="chart-toggle">
+          <input type="checkbox" id="resolved-by-person" /> Items Resolved by Person
+        </label>
+        <label class="chart-toggle">
+          <input type="checkbox" id="burndown-pi" /> Burndown by Target PI
+        </label>
+        <label class="chart-toggle">
+          <input type="checkbox" id="wip-trend" /> WIP Trend
+        </label>
+        <label class="chart-toggle">
+          <input type="checkbox" id="age-distribution" /> Age Distribution
+        </label>
+        <label class="chart-toggle">
+          <input type="checkbox" id="flow-efficiency" /> Flow Efficiency
+        </label>
+        <label class="chart-toggle">
+          <input type="checkbox" id="stale-items" /> Stale Items
+        </label>
+        <label class="chart-toggle">
+          <input type="checkbox" id="bug-ratio-trend" /> Bug Ratio Trend
+        </label>
+        <label class="chart-toggle">
+          <input type="checkbox" id="tp-predictability" /> Throughput Predictability
+        </label>
+        <label class="chart-toggle">
+          <input type="checkbox" id="priority-age-dist" /> Priority Age Distribution
+        </label>
+        <label class="chart-toggle">
+          <input type="checkbox" id="cfd-chart" /> Cumulative Flow Diagram (CFD)
+        </label>
+      </div>
+    </div>
 
-  <div class="field">
-    <label>Auto-refresh interval</label>
-    <select id="refreshInterval">
-      <option value="5">Every 5 minutes</option>
-      <option value="10">Every 10 minutes</option>
-      <option value="15" selected>Every 15 minutes</option>
-      <option value="30">Every 30 minutes</option>
-      <option value="60">Every hour</option>
-    </select>
-  </div>
+    <!-- Full-width footer -->
+    <div class="settings-footer">
+      <div class="section-sep"></div>
 
-  <div class="section-sep"></div>
+      <div class="actions">
+        <button class="btn-primary" id="save-btn">Save Settings</button>
+        <button class="btn-secondary" id="test-btn">Test Connection</button>
+      </div>
+      <div id="status" class="status"></div>
+      <div id="test-result" class="test-result"></div>
 
-  <div class="section-title">
-    <span>Pods / Teams</span>
-  </div>
-  <p class="hint" style="margin-bottom:0.75rem">Each pod maps to an ADO area path. Add one row per team you want to track.</p>
-  <div id="pods-list"></div>
-  <button class="add-pod-btn" id="add-pod-btn">+ Add Pod</button>
-
-  <div class="section-sep"></div>
-
-  <div class="section-title">
-    <span>Overview Charts</span>
-  </div>
-  <p class="hint" style="margin-bottom:0.75rem">Enable optional charts on the overview dashboard.</p>
-  <div class="chart-toggles">
-    <label class="chart-toggle">
-      <input type="checkbox" checked disabled /> Arrival Rate &amp; Throughput <span class="toggle-note">(always on)</span>
-    </label>
-    <label class="chart-toggle">
-      <input type="checkbox" id="ct-in-progress" /> Cycle Time (In Progress &rarr; Closed)
-    </label>
-    <label class="chart-toggle">
-      <input type="checkbox" id="ct-arrival" /> Cycle Time (Arrival &rarr; Closed)
-    </label>
-    <label class="chart-toggle">
-      <input type="checkbox" id="tp-by-person" /> Throughput per Person per Week
-    </label>
-    <label class="chart-toggle">
-      <input type="checkbox" id="ct-by-person" /> Items Closed by Person
-    </label>
-    <label class="chart-toggle">
-      <input type="checkbox" id="resolved-by-person" /> Items Resolved by Person
-    </label>
-    <label class="chart-toggle">
-      <input type="checkbox" id="burndown-pi" /> Burndown by Target PI
-    </label>
-    <label class="chart-toggle">
-      <input type="checkbox" id="wip-trend" /> WIP Trend
-    </label>
-    <label class="chart-toggle">
-      <input type="checkbox" id="age-distribution" /> Age Distribution
-    </label>
-    <label class="chart-toggle">
-      <input type="checkbox" id="flow-efficiency" /> Flow Efficiency
-    </label>
-    <label class="chart-toggle">
-      <input type="checkbox" id="stale-items" /> Stale Items
-    </label>
-    <label class="chart-toggle">
-      <input type="checkbox" id="bug-ratio-trend" /> Bug Ratio Trend
-    </label>
-    <label class="chart-toggle">
-      <input type="checkbox" id="tp-predictability" /> Throughput Predictability
-    </label>
-    <label class="chart-toggle">
-      <input type="checkbox" id="priority-age-dist" /> Priority Age Distribution
-    </label>
-    <label class="chart-toggle">
-      <input type="checkbox" id="cfd-chart" /> Cumulative Flow Diagram (CFD)
-    </label>
-  </div>
-
-  <div class="section-sep"></div>
-
-  <div class="actions">
-    <button class="btn-primary" id="save-btn">Save Settings</button>
-    <button class="btn-secondary" id="test-btn">Test Connection</button>
-  </div>
-  <div id="status" class="status"></div>
-  <div id="test-result" class="test-result"></div>
-
-  <div class="section-sep"></div>
-  <div style="font-size:0.72rem;color:#475569">
-    Your PAT is stored only in Chrome's local extension storage and is only ever sent to Azure DevOps.
+      <div class="section-sep"></div>
+      <div style="font-size:0.75rem;color:var(--muted)">
+        Your PAT is stored only in Chrome's local extension storage and is only ever sent to Azure DevOps.
+      </div>
+    </div>
   </div>
 </div>
+<script src="shared.js"></script>
 <script src="options.js"></script>
 </body>
 </html>
