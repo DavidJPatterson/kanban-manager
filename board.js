@@ -152,6 +152,17 @@ async function buildOverviewPanel(cachedData) {
       <div class="pod-card-footer">
         <span class="pod-arr">↑${pStats.last7} this wk &nbsp;${pTrend} vs prev &nbsp;·&nbsp; avg ${pStats.avgPerWeek}/wk</span>
         ${pod.error ? `<span class="pod-err">⚠ error</span>` : ''}
+        ${(() => {
+          const wl = pod.wipLimits || {}
+          const breaches = Object.entries(wl).filter(([col, lim]) => {
+            const cnt = pActive.filter(i => (i.boardColumn || i.state) === col).length
+            return cnt > lim
+          }).map(([col, lim]) => {
+            const cnt = pActive.filter(i => (i.boardColumn || i.state) === col).length
+            return `${col}: ${cnt}/${lim}`
+          })
+          return breaches.length ? `<span class="pod-wip-warn">⚠ WIP over: ${breaches.join(', ')}</span>` : ''
+        })()}
       </div>
     `;
     card.addEventListener('click', () => switchTab(pod.id));
@@ -811,10 +822,14 @@ function buildPodPanel(pod) {
     <div class="board">
       ${columnNames.map(col => {
         const dotColor = getColumnColor(col);
-        return `<div class="column">
-          <div class="col-header">
+        const wipLimit = (pod.wipLimits || {})[col];
+        const colCount = byCol[col].length;
+        const wipExceeded = wipLimit && colCount > wipLimit;
+        const countLabel = wipLimit ? `${colCount} / ${wipLimit}` : colCount;
+        return `<div class="column${wipExceeded ? ' wip-exceeded' : ''}">
+          <div class="col-header${wipExceeded ? ' wip-exceeded' : ''}">
             <div class="col-title"><div class="col-dot" style="background:${dotColor}"></div>${escHtml(col)}</div>
-            <span class="col-count">${byCol[col].length}</span>
+            <span class="col-count">${countLabel}</span>
           </div>
           <div class="col-body" data-column="${escHtml(col)}">${byCol[col].map(makeCard).join('')}</div>
         </div>`;
@@ -825,10 +840,15 @@ function buildPodPanel(pod) {
 
   // ── Helper: update column counts ──
   function updateColCounts() {
-    panel.querySelectorAll('.col-count').forEach((cnt, i) => {
-      const bodies = panel.querySelectorAll('.col-body');
-      if (bodies[i]) cnt.textContent = bodies[i].querySelectorAll('.card:not(.hidden)').length;
-    });
+    panel.querySelectorAll('.column').forEach(colEl => {
+      const colName = colEl.querySelector('.col-body')?.dataset.column
+      const wipLimit = (pod.wipLimits || {})[colName]
+      const visible = colEl.querySelectorAll('.card:not(.hidden)').length
+      colEl.querySelector('.col-count').textContent = wipLimit ? `${visible} / ${wipLimit}` : visible
+      const exceeded = wipLimit && visible > wipLimit
+      colEl.querySelector('.col-header').classList.toggle('wip-exceeded', exceeded)
+      colEl.classList.toggle('wip-exceeded', exceeded)
+    })
   }
 
   // ── Helper: apply search + filter together ──

@@ -90,6 +90,10 @@ All calls target `https://dev.azure.com/{org}/{project}/_apis/...`:
 | `/wit/workitemsbatch` | POST | Fetch details for up to 200 items |
 | `/wit/workitems/{id}/updates` | GET | Trace state history for arrival dates |
 | `/wit/workitems/{id}` | PATCH | Update item (partially stubbed) |
+| `/_apis/projects/{project}/teams` | GET | List teams (for WIP limit resolution) |
+| `/{team}/_apis/work/teamsettings/teamfieldvalues` | GET | Map area paths to teams |
+| `/{team}/_apis/work/boards` | GET | List boards for a team |
+| `/{team}/_apis/work/boards/{board}` | GET | Get board columns with WIP limits |
 
 Authentication: `Authorization: Basic {base64(':' + pat)}`
 
