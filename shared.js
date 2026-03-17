@@ -265,6 +265,61 @@ async function enrichWithArrivedAt(items, podAreaPath, settings) {
   });
 }
 
+// ─── ADO Board WIP Limits ─────────────────────────────────────────────────────
+
+// Resolve a pod's area path to its ADO team
+async function fetchTeamForPod(pod, settings) {
+  const teamsResp = await adoFetch(
+    `https://dev.azure.com/${encodeURIComponent(settings.org)}/_apis/projects/${encodeURIComponent(settings.project)}/teams?api-version=7.1`,
+    settings
+  )
+  for (const team of teamsResp.value || []) {
+    try {
+      const fields = await adoFetch(
+        `https://dev.azure.com/${encodeURIComponent(settings.org)}/${encodeURIComponent(settings.project)}/${team.id}/_apis/work/teamsettings/teamfieldvalues?api-version=7.1`,
+        settings
+      )
+      for (const v of fields.values || []) {
+        if (v.value === pod.areaPath) return team
+        if (v.includeChildren && pod.areaPath.startsWith(v.value + '\\')) return team
+      }
+    } catch (_) { /* skip teams we can't read */ }
+  }
+  return null
+}
+
+// Fetch WIP limits from the ADO board columns for a pod's team
+async function fetchWipLimits(pod, settings) {
+  try {
+    const team = pod.teamId
+      ? { id: pod.teamId }
+      : await fetchTeamForPod(pod, settings)
+    if (!team) return { wipLimits: {}, teamId: null, boardName: null }
+
+    let boardName = pod.boardName
+    if (!boardName) {
+      const boards = await adoFetch(
+        `https://dev.azure.com/${encodeURIComponent(settings.org)}/${encodeURIComponent(settings.project)}/${team.id}/_apis/work/boards?api-version=7.1`,
+        settings
+      )
+      boardName = (boards.value || [])[0]?.name || 'Stories'
+    }
+
+    const board = await adoFetch(
+      `https://dev.azure.com/${encodeURIComponent(settings.org)}/${encodeURIComponent(settings.project)}/${team.id}/_apis/work/boards/${encodeURIComponent(boardName)}?api-version=7.1`,
+      settings
+    )
+
+    const wipLimits = {}
+    for (const col of board.columns || []) {
+      if (col.itemLimit > 0) wipLimits[col.name] = col.itemLimit
+    }
+    return { wipLimits, teamId: team.id, boardName }
+  } catch (_) {
+    return { wipLimits: {}, teamId: null, boardName: null }
+  }
+}
+
 // Fetch data for a single pod area path
 async function fetchPodData(pod, settings) {
   const ap = pod.areaPath;
@@ -306,9 +361,10 @@ async function fetchAllPods(settings) {
   await Promise.all(pods.map(async pod => {
     try {
       const items = await fetchPodData(pod, settings);
-      podResults[pod.id] = { id: pod.id, name: pod.name, areaPath: pod.areaPath, items, fetchedAt: new Date().toISOString(), error: null };
+      const { wipLimits, teamId, boardName } = await fetchWipLimits(pod, settings);
+      podResults[pod.id] = { id: pod.id, name: pod.name, areaPath: pod.areaPath, items, wipLimits, teamId, boardName, fetchedAt: new Date().toISOString(), error: null };
     } catch (err) {
-      podResults[pod.id] = { id: pod.id, name: pod.name, areaPath: pod.areaPath, items: [], fetchedAt: new Date().toISOString(), error: err.message };
+      podResults[pod.id] = { id: pod.id, name: pod.name, areaPath: pod.areaPath, items: [], wipLimits: {}, fetchedAt: new Date().toISOString(), error: err.message };
     }
   }));
 

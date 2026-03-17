@@ -85,6 +85,11 @@
   .col-count { background: var(--surface2); color: var(--muted); border-radius: 12px; padding: .1rem .5rem; font-size: .7rem; font-weight: 600; }
   .col-body { display: flex; flex-direction: column; gap: .4rem; }
 
+  /* ── WIP limit exceeded ── */
+  .col-header.wip-exceeded .col-count { background: rgba(239,68,68,.2); color: #ef4444; font-weight: 700; }
+  .col-header.wip-exceeded .col-title { color: #fca5a5; }
+  .column.wip-exceeded { border-top: 2px solid #ef4444; box-shadow: 0 0 0 1px rgba(239,68,68,.3); border-radius: 6px; }
+
   /* ── Cards ── */
   a.card {
     background: var(--surface); border: 1px solid var(--border); border-left: 3px solid var(--border);
@@ -172,6 +177,7 @@
   .pod-card-footer { display: flex; justify-content: space-between; align-items: center; }
   .pod-arr { font-size: 0.72rem; color: var(--muted); }
   .pod-err { font-size: 0.68rem; color: #fca5a5; background: rgba(239,68,68,.1); padding: .15rem .4rem; border-radius: 4px; }
+  .pod-wip-warn { font-size: 0.68rem; color: #fbbf24; background: rgba(251,191,36,.1); padding: .15rem .4rem; border-radius: 4px; display: block; margin-top: .25rem; }
 
   /* ── Collapsible pod blocks ── */
   .pod-block-header {

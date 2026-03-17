@@ -5,14 +5,15 @@ A Chrome extension that provides a multi-pod Kanban dashboard with flow metrics,
 ## Features
 
 - **Multi-pod overview** — track multiple teams/area paths from a single dashboard
-- **Full Kanban board** with drag-and-drop column transitions
+- **Full Kanban board** with drag-and-drop column transitions and revert support
+- **WIP limits** — sourced from ADO board policies; columns turn red when limits are exceeded
 - **Flow metrics** — arrival rate, throughput, week-on-week trends
 - **Cycle time** — scatter plots for In Progress-to-Closed and Arrival-to-Closed
 - **Per-person analytics** — throughput, items closed, items resolved with sparklines
-- **Health charts** — WIP trend, age distribution, flow efficiency, stale items, bug ratio, throughput predictability
+- **Health charts** — WIP trend, age distribution, flow efficiency, stale items, bug ratio, throughput predictability, priority age distribution, cumulative flow diagram
 - **Burndown** — by Target PI with ideal-line overlay
-- **Filters** — by assignee, type, aged items, free-text search
-- **Auto-refresh** — configurable background polling
+- **Filters** — by assignee, type, aged items, free-text search with persisted filter state
+- **Auto-refresh** — configurable background polling with ADO retry and exponential backoff
 - **Quick popup** — key stats at a glance
 
 ## Installation
