@@ -25,6 +25,27 @@ function fmtDate(isoStr) {
          ' · ' + d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
 }
 
+function renderSparkline(container, data, { width = 64, height = 24 } = {}) {
+  if (!data || data.length < 2) { container.innerHTML = ''; return }
+  const counts = data.map(d => d.count)
+  const max = Math.max(...counts, 1)
+  const pad = 2
+  const w = width - pad * 2
+  const h = height - pad * 2
+  const points = counts.map((v, i) => {
+    const x = pad + (i / (counts.length - 1)) * w
+    const y = pad + h - (v / max) * h
+    return `${x.toFixed(1)},${y.toFixed(1)}`
+  })
+  const last = points[points.length - 1]
+  const fillPoints = [...points, `${(pad + w).toFixed(1)},${(pad + h).toFixed(1)}`, `${pad.toFixed(1)},${(pad + h).toFixed(1)}`]
+  container.innerHTML = `<svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
+    <polygon class="spark-fill" points="${fillPoints.join(' ')}" />
+    <polyline points="${points.join(' ')}" />
+    <circle class="spark-dot" cx="${last.split(',')[0]}" cy="${last.split(',')[1]}" r="2" />
+  </svg>`
+}
+
 const DOT_COLORS = {
   'In Progress': '#f59e0b', 'Code Review': '#8b5cf6',
   'Ready for Release': '#10b981', 'Intake/Triage': '#6366f1'
@@ -32,6 +53,9 @@ const DOT_COLORS = {
 
 function render(data) {
   if (!data?.pods) return;
+  const skel = $('popup-skeleton')
+  if (skel) skel.style.display = 'none'
+  $('main').style.display = 'block'
 
   const allItems = getAllItems(data);
   const allActive = allItems.filter(i => !['Closed', 'Removed', 'Resolved'].includes(i.state));
@@ -51,6 +75,7 @@ function render(data) {
   // Aggregate arrival rate
   const stats = arrivalStats(allItems);
   $('a-last7').textContent = stats.last7;
+  renderSparkline($('a-sparkline'), calcWeeklyArrival(allItems, 8));
   const diff = stats.last7 - stats.prev7;
   $('a-trend').innerHTML = diff === 0
     ? `<span class="trend-same">→ same as prev week</span>`
@@ -129,16 +154,18 @@ chrome.runtime.onMessage.addListener(msg => {
 
 // Initialise
 (async () => {
+  await initTheme()
   const settings = await getSettings();
   if (!settings.pat) {
     $('no-pat').style.display = 'block';
     return;
   }
-  $('main').style.display = 'block';
   const data = await getCachedData();
   if (data) {
+    $('main').style.display = 'block';
     render(data);
   } else {
+    $('popup-skeleton').style.display = 'block';
     $('last-updated').textContent = 'No data yet — refreshing…';
     triggerRefresh();
   }

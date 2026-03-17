@@ -917,7 +917,7 @@ function calcBurndown(items, targetPI) {
 function renderBarChart(container, datasets, opts = {}) {
   const W = opts.width || 600;
   const H = opts.height || 160;
-  const PAD = { top: 16, right: 10, bottom: 46, left: 28 };
+  const PAD = { top: 16, right: opts.avgLine ? 40 : 10, bottom: 46, left: 28 };
   const chartW = W - PAD.left - PAD.right;
   const chartH = H - PAD.top - PAD.bottom;
 
@@ -934,7 +934,7 @@ function renderBarChart(container, datasets, opts = {}) {
   for (let i = 0; i <= 4; i++) {
     const y = PAD.top + (chartH * (1 - i / 4));
     const val = Math.round((maxVal * i) / 4);
-    svg += `<line x1="${PAD.left}" y1="${y}" x2="${PAD.left + chartW}" y2="${y}" stroke="#334155" stroke-width="1"/>`;
+    svg += `<line x1="${PAD.left}" y1="${y}" x2="${PAD.left + chartW}" y2="${y}" stroke="#334155" stroke-width="0.5" stroke-dasharray="4,4" opacity="0.6"/>`;
     svg += `<text x="${PAD.left - 4}" y="${y + 4}" text-anchor="end" font-size="9" fill="#64748b">${val}</text>`;
   }
 
@@ -944,7 +944,7 @@ function renderBarChart(container, datasets, opts = {}) {
       const barH = (d.count / maxVal) * chartH;
       const x = PAD.left + i * groupW + di * barW + 4;
       const y = PAD.top + chartH - barH;
-      svg += `<rect x="${x}" y="${y}" width="${barW}" height="${barH}" rx="2" fill="${ds_item.color}" opacity="0.85"/>`;
+      svg += `<rect x="${x}" y="${y}" width="${barW}" height="${barH}" rx="3" fill="${ds_item.color}" opacity="0.85"><title>${d.label}: ${d.count}</title></rect>`;
       if (d.count > 0) {
         svg += `<text x="${x + barW / 2}" y="${y - 3}" text-anchor="middle" font-size="9" fill="${ds_item.color}">${d.count}</text>`;
       }
@@ -958,12 +958,20 @@ function renderBarChart(container, datasets, opts = {}) {
     svg += `<text transform="rotate(-45,${cx},${cy})" x="${cx}" y="${cy}" text-anchor="end" font-size="8" fill="#64748b">${label}</text>`;
   });
 
+  // Average line (optional — pass opts.avgLine = { value, label, color })
+  if (opts.avgLine && opts.avgLine.value > 0) {
+    const avgY = PAD.top + chartH * (1 - opts.avgLine.value / maxVal)
+    const col = opts.avgLine.color || '#64748b'
+    svg += `<line x1="${PAD.left}" y1="${avgY}" x2="${PAD.left + chartW}" y2="${avgY}" stroke="${col}" stroke-width="1.5" stroke-dasharray="6,3" opacity="0.8"/>`
+    svg += `<text x="${PAD.left + chartW + 3}" y="${avgY + 3}" font-size="8" fill="${col}">${opts.avgLine.label || 'avg'} ${opts.avgLine.value}</text>`
+  }
+
   // Legend
   datasets.forEach((ds_item, di) => {
     const lx = PAD.left + di * 100;
     const ly = H - 8;
     svg += `<rect x="${lx}" y="${ly - 8}" width="10" height="10" rx="2" fill="${ds_item.color}"/>`;
-    svg += `<text x="${lx + 14}" y="${ly}" font-size="10" fill="#94a3b8">${ds_item.label}</text>`;
+    svg += `<text x="${lx + 14}" y="${ly}" font-size="10" fill="#64748b">${ds_item.label}</text>`;
   });
 
   svg += '</svg>';
@@ -980,7 +988,7 @@ function renderScatterChart(container, dataPoints, opts = {}) {
   const chartH = H - PAD.top - PAD.bottom;
 
   if (!dataPoints.length) {
-    container.innerHTML = '<div style="font-size:.75rem;color:#64748b;padding:.5rem">No cycle time data available</div>';
+    container.innerHTML = '<div style="font-size:.75rem;color:var(--muted, #64748b);padding:.5rem">No cycle time data available</div>';
     return;
   }
 
@@ -1003,7 +1011,7 @@ function renderScatterChart(container, dataPoints, opts = {}) {
   for (let i = 0; i <= ySteps; i++) {
     const y = PAD.top + chartH * (1 - i / ySteps);
     const val = Math.round((maxDays * i) / ySteps);
-    svg += `<line x1="${PAD.left}" y1="${y}" x2="${PAD.left + chartW}" y2="${y}" stroke="#334155" stroke-width="1"/>`;
+    svg += `<line x1="${PAD.left}" y1="${y}" x2="${PAD.left + chartW}" y2="${y}" stroke="#334155" stroke-width="0.5" stroke-dasharray="4,4" opacity="0.6"/>`;
     svg += `<text x="${PAD.left - 4}" y="${y + 4}" text-anchor="end" font-size="9" fill="#64748b">${val}d</text>`;
   }
 
@@ -1020,12 +1028,11 @@ function renderScatterChart(container, dataPoints, opts = {}) {
     const x = PAD.left + ((d.closedDate.getTime() - minDate) / dateRange) * chartW;
     const y = PAD.top + chartH * (1 - d.days / maxDays);
     const color = d.type === 'Bug' ? '#ef4444' : '#3b82f6';
+    const dot = `<circle cx="${x}" cy="${y}" r="3.5" fill="${color}" opacity="0.65" stroke="${color}" stroke-width="0.75" stroke-opacity="0.9"><title>#${d.id}: ${d.days}d</title></circle>`;
     if (d.url) {
-      svg += `<a href="${d.url}" target="_blank" style="cursor:pointer">`;
-      svg += `<circle cx="${x}" cy="${y}" r="3.5" fill="${color}" opacity="0.7" style="cursor:pointer"><title>#${d.id}: ${d.days}d</title></circle>`;
-      svg += `</a>`;
+      svg += `<a href="${d.url}" target="_blank" style="cursor:pointer">${dot}</a>`;
     } else {
-      svg += `<circle cx="${x}" cy="${y}" r="3.5" fill="${color}" opacity="0.7"><title>#${d.id}: ${d.days}d</title></circle>`;
+      svg += dot;
     }
   });
 
@@ -1040,10 +1047,10 @@ function renderScatterChart(container, dataPoints, opts = {}) {
 
   // Legend
   svg += `<circle cx="${PAD.left}" cy="${H - 10}" r="3.5" fill="#ef4444"/>`;
-  svg += `<text x="${PAD.left + 8}" y="${H - 7}" font-size="9" fill="#94a3b8">Bug</text>`;
+  svg += `<text x="${PAD.left + 8}" y="${H - 7}" font-size="9" fill="#64748b">Bug</text>`;
   svg += `<circle cx="${PAD.left + 40}" cy="${H - 10}" r="3.5" fill="#3b82f6"/>`;
-  svg += `<text x="${PAD.left + 48}" y="${H - 7}" font-size="9" fill="#94a3b8">Story</text>`;
-  svg += `<text x="${PAD.left + 100}" y="${H - 7}" font-size="9" fill="#94a3b8">avg: ${avg}d · p50: ${p50}d · p85: ${p85}d</text>`;
+  svg += `<text x="${PAD.left + 48}" y="${H - 7}" font-size="9" fill="#64748b">Story</text>`;
+  svg += `<text x="${PAD.left + 100}" y="${H - 7}" font-size="9" fill="#64748b">avg: ${avg}d · p50: ${p50}d · p85: ${p85}d</text>`;
 
   svg += '</svg>';
   container.innerHTML = svg;
@@ -1059,7 +1066,7 @@ function renderLineChart(container, datasets, opts = {}) {
   const chartH = H - PAD.top - PAD.bottom;
 
   if (!datasets.length || !datasets[0].data.length) {
-    container.innerHTML = '<div style="font-size:.75rem;color:#64748b;padding:.5rem">No burndown data available</div>';
+    container.innerHTML = '<div style="font-size:.75rem;color:var(--muted, #64748b);padding:.5rem">No burndown data available</div>';
     return;
   }
 
@@ -1074,7 +1081,7 @@ function renderLineChart(container, datasets, opts = {}) {
   for (let i = 0; i <= 4; i++) {
     const y = PAD.top + chartH * (1 - i / 4);
     const val = Math.round((maxVal * i) / 4);
-    svg += `<line x1="${PAD.left}" y1="${y}" x2="${PAD.left + chartW}" y2="${y}" stroke="#334155" stroke-width="1"/>`;
+    svg += `<line x1="${PAD.left}" y1="${y}" x2="${PAD.left + chartW}" y2="${y}" stroke="#334155" stroke-width="0.5" stroke-dasharray="4,4" opacity="0.6"/>`;
     svg += `<text x="${PAD.left - 4}" y="${y + 4}" text-anchor="end" font-size="9" fill="#64748b">${val}</text>`;
   }
 
@@ -1086,20 +1093,21 @@ function renderLineChart(container, datasets, opts = {}) {
       return `${x},${y}`;
     });
 
-    if (ds.fill) {
+    // Area fill — explicit via ds.fill, or auto for non-dashed lines
+    if (ds.fill || !ds.dashed) {
       const firstX = PAD.left;
-      const lastX = PAD.left + chartW;
+      const lastX = PAD.left + ((n - 1) / (n - 1 || 1)) * chartW;
       const baseY = PAD.top + chartH;
-      svg += `<polygon points="${firstX},${baseY} ${points.join(' ')} ${lastX},${baseY}" fill="${ds.color}" opacity="0.1"/>`;
+      svg += `<polygon points="${firstX},${baseY} ${points.join(' ')} ${lastX},${baseY}" fill="${ds.color}" opacity="${ds.fill ? 0.1 : 0.06}"/>`;
     }
 
-    svg += `<polyline points="${points.join(' ')}" fill="none" stroke="${ds.color}" stroke-width="${ds.dashed ? 1.5 : 2}" ${ds.dashed ? 'stroke-dasharray="6,4"' : ''}/>`;
+    svg += `<polyline points="${points.join(' ')}" fill="none" stroke="${ds.color}" stroke-width="${ds.dashed ? 1.5 : 2}" stroke-linecap="round" stroke-linejoin="round" ${ds.dashed ? 'stroke-dasharray="6,4"' : ''}/>`;
 
-    // Dots
+    // Dots with tooltips
     ds.data.forEach((d, i) => {
       const x = PAD.left + (i / (n - 1 || 1)) * chartW;
       const y = PAD.top + chartH * (1 - d.value / maxVal);
-      svg += `<circle cx="${x}" cy="${y}" r="2.5" fill="${ds.color}"/>`;
+      svg += `<circle cx="${x}" cy="${y}" r="2.5" fill="${ds.color}"><title>${d.label}: ${d.value}</title></circle>`;
     });
   });
 
@@ -1115,7 +1123,7 @@ function renderLineChart(container, datasets, opts = {}) {
     const lx = PAD.left + di * 120;
     const ly = H - 8;
     svg += `<line x1="${lx}" y1="${ly - 3}" x2="${lx + 12}" y2="${ly - 3}" stroke="${ds.color}" stroke-width="2" ${ds.dashed ? 'stroke-dasharray="4,3"' : ''}/>`;
-    svg += `<text x="${lx + 16}" y="${ly}" font-size="9" fill="#94a3b8">${ds.label}</text>`;
+    svg += `<text x="${lx + 16}" y="${ly}" font-size="9" fill="#64748b">${ds.label}</text>`;
   });
 
   svg += '</svg>';
@@ -1132,7 +1140,7 @@ function renderStackedBarChart(container, labels, people, opts = {}) {
   const chartH = H - PAD.top - PAD.bottom;
 
   if (!people.length) {
-    container.innerHTML = '<div style="font-size:.75rem;color:#64748b;padding:.5rem">No per-person throughput data</div>';
+    container.innerHTML = '<div style="font-size:.75rem;color:var(--muted, #64748b);padding:.5rem">No per-person throughput data</div>';
     return;
   }
 
@@ -1150,7 +1158,7 @@ function renderStackedBarChart(container, labels, people, opts = {}) {
   for (let i = 0; i <= 4; i++) {
     const y = PAD.top + (chartH * (1 - i / 4));
     const val = Math.round((maxVal * i) / 4);
-    svg += `<line x1="${PAD.left}" y1="${y}" x2="${PAD.left + chartW}" y2="${y}" stroke="#334155" stroke-width="1"/>`;
+    svg += `<line x1="${PAD.left}" y1="${y}" x2="${PAD.left + chartW}" y2="${y}" stroke="#334155" stroke-width="0.5" stroke-dasharray="4,4" opacity="0.6"/>`;
     svg += `<text x="${PAD.left - 4}" y="${y + 4}" text-anchor="end" font-size="9" fill="#64748b">${val}</text>`;
   }
 
@@ -1163,11 +1171,11 @@ function renderStackedBarChart(container, labels, people, opts = {}) {
       const barH = (count / maxVal) * chartH;
       const y = PAD.top + chartH - yOffset - barH;
       const color = assigneeColor(people[pi].name);
-      svg += `<rect x="${x}" y="${y}" width="${barW}" height="${barH}" fill="${color}" opacity="0.85"><title>${people[pi].name.split(' ')[0]}: ${count}</title></rect>`;
+      svg += `<rect x="${x}" y="${y}" width="${barW}" height="${barH}" rx="2" fill="${color}" opacity="0.85"><title>${people[pi].name.split(' ')[0]}: ${count}</title></rect>`;
       yOffset += barH;
     }
     if (stackedTotals[i] > 0) {
-      svg += `<text x="${x + barW / 2}" y="${PAD.top + chartH - yOffset - 3}" text-anchor="middle" font-size="9" fill="#94a3b8">${stackedTotals[i]}</text>`;
+      svg += `<text x="${x + barW / 2}" y="${PAD.top + chartH - yOffset - 3}" text-anchor="middle" font-size="9" fill="#64748b">${stackedTotals[i]}</text>`;
     }
   }
 
@@ -1184,7 +1192,7 @@ function renderStackedBarChart(container, labels, people, opts = {}) {
     const color = assigneeColor(p.name);
     const short = p.name.split(' ')[0];
     svg += `<rect x="${lx}" y="${legendY - 8}" width="8" height="8" rx="2" fill="${color}"/>`;
-    svg += `<text x="${lx + 11}" y="${legendY}" font-size="9" fill="#94a3b8">${short}</text>`;
+    svg += `<text x="${lx + 11}" y="${legendY}" font-size="9" fill="#64748b">${short}</text>`;
     lx += short.length * 6 + 20;
   });
 
@@ -1196,7 +1204,7 @@ function renderStackedBarChart(container, labels, people, opts = {}) {
 
 function renderClosedByPersonChart(container, data, opts = {}) {
   if (!data.length) {
-    container.innerHTML = '<div style="font-size:.75rem;color:#64748b;padding:.5rem">No items closed by assignees</div>';
+    container.innerHTML = '<div style="font-size:.75rem;color:var(--muted, #64748b);padding:.5rem">No items closed by assignees</div>';
     return;
   }
 
@@ -1222,7 +1230,7 @@ function renderClosedByPersonChart(container, data, opts = {}) {
     const barH = ROW_H - 10;
 
     // Name
-    svg += `<text x="${PAD.left - 6}" y="${y + ROW_H / 2 + 3}" text-anchor="end" font-size="10" fill="#e2e8f0">${short}</text>`;
+    svg += `<text x="${PAD.left - 6}" y="${y + ROW_H / 2 + 3}" text-anchor="end" font-size="10" fill="currentColor">${short}</text>`;
 
     // This week bar
     const barW = Math.max(1, (d.thisWeek / maxVal) * barMaxW);
@@ -1233,7 +1241,7 @@ function renderClosedByPersonChart(container, data, opts = {}) {
 
     // Average marker line (dashed vertical)
     const avgX = PAD.left + (d.avg / maxVal) * barMaxW;
-    svg += `<line x1="${avgX}" y1="${y + 3}" x2="${avgX}" y2="${y + ROW_H - 3}" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="3,2"><title>avg ${d.avg}/wk</title></line>`;
+    svg += `<line x1="${avgX}" y1="${y + 3}" x2="${avgX}" y2="${y + ROW_H - 3}" stroke="#64748b" stroke-width="1.5" stroke-dasharray="3,2"><title>avg ${d.avg}/wk</title></line>`;
 
     // Avg/wk label on right
     svg += `<text x="${PAD.left + chartW + 6}" y="${y + ROW_H / 2 + 3}" font-size="9" fill="#64748b">${d.avg}</text>`;
@@ -1249,7 +1257,7 @@ function renderClosedByPersonChart(container, data, opts = {}) {
       const py = spkY + spkH - (v / spkMax) * spkH;
       return `${px},${py}`;
     }).join(' ');
-    svg += `<polyline points="${spkPoints}" fill="none" stroke="${color}" stroke-width="1.2" opacity="0.6"/>`;
+    svg += `<polyline points="${spkPoints}" fill="none" stroke="${color}" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" opacity="0.6"/>`;
   });
 
   svg += '</svg>';
@@ -1275,7 +1283,7 @@ function renderStaleItemsChart(container, staleData, opts = {}) {
   data.forEach((d, i) => {
     const y = PAD.top + i * ROW_H;
     const barW = Math.max(1, (d.count / maxCount) * chartW);
-    svg += `<text x="${PAD.left - 6}" y="${y + ROW_H / 2 + 3}" text-anchor="end" font-size="9" fill="#e2e8f0">${d.col}</text>`;
+    svg += `<text x="${PAD.left - 6}" y="${y + ROW_H / 2 + 3}" text-anchor="end" font-size="9" fill="currentColor">${d.col}</text>`;
     svg += `<rect x="${PAD.left}" y="${y + 3}" width="${barW}" height="${ROW_H - 6}" rx="3" fill="#ef4444" opacity="0.6"/>`;
     svg += `<text x="${PAD.left + barW + 4}" y="${y + ROW_H / 2 + 3}" font-size="9" font-weight="600" fill="#fca5a5">${d.count}</text>`;
   });
@@ -1288,9 +1296,9 @@ function renderStaleItemsChart(container, staleData, opts = {}) {
 function renderMetricCard(container, metrics) {
   container.innerHTML = metrics.map(m =>
     `<div style="text-align:center;padding:.25rem .5rem">
-      <div style="font-size:1.4rem;font-weight:700;color:${m.color || '#e2e8f0'};line-height:1">${m.value}</div>
-      <div style="font-size:.6rem;color:#94a3b8;margin-top:.1rem">${m.label}</div>
-      ${m.sub ? `<div style="font-size:.58rem;color:#64748b;margin-top:.05rem">${m.sub}</div>` : ''}
+      <div style="font-size:1.4rem;font-weight:700;color:${m.color || 'var(--text)'};line-height:1">${m.value}</div>
+      <div style="font-size:.625rem;color:var(--muted);margin-top:.1rem">${m.label}</div>
+      ${m.sub ? `<div style="font-size:.625rem;color:var(--muted);margin-top:.05rem">${m.sub}</div>` : ''}
     </div>`
   ).join('');
   container.style.cssText = 'display:flex;gap:.75rem;flex-wrap:wrap;justify-content:center';
@@ -1300,7 +1308,7 @@ function renderMetricCard(container, metrics) {
 
 function renderPriorityAgeChart(container, data, opts = {}) {
   if (!data.priorities.length) {
-    container.innerHTML = '<div style="font-size:.75rem;color:#64748b;padding:.5rem">No active items</div>';
+    container.innerHTML = '<div style="font-size:.75rem;color:var(--muted, #64748b);padding:.5rem">No active items</div>';
     return;
   }
 
@@ -1326,7 +1334,7 @@ function renderPriorityAgeChart(container, data, opts = {}) {
   for (let i = 0; i <= 4; i++) {
     const y = PAD.top + chartH * (1 - i / 4);
     const val = Math.round((maxVal * i) / 4);
-    svg += `<line x1="${PAD.left}" y1="${y}" x2="${PAD.left + chartW}" y2="${y}" stroke="#334155" stroke-width="1"/>`;
+    svg += `<line x1="${PAD.left}" y1="${y}" x2="${PAD.left + chartW}" y2="${y}" stroke="#334155" stroke-width="0.5" stroke-dasharray="4,4" opacity="0.6"/>`;
     svg += `<text x="${PAD.left - 4}" y="${y + 4}" text-anchor="end" font-size="9" fill="#64748b">${val}</text>`;
   }
 
@@ -1344,7 +1352,7 @@ function renderPriorityAgeChart(container, data, opts = {}) {
       yOffset += barH;
     }
     if (totals[bi] > 0) {
-      svg += `<text x="${x + barW / 2}" y="${PAD.top + chartH - yOffset - 3}" text-anchor="middle" font-size="9" fill="#94a3b8">${totals[bi]}</text>`;
+      svg += `<text x="${x + barW / 2}" y="${PAD.top + chartH - yOffset - 3}" text-anchor="middle" font-size="9" fill="#64748b">${totals[bi]}</text>`;
     }
   });
 
@@ -1360,7 +1368,7 @@ function renderPriorityAgeChart(container, data, opts = {}) {
     const lx = PAD.left + chartW + 6;
     const ly = PAD.top + i * 16 + 10;
     svg += `<rect x="${lx}" y="${ly - 7}" width="9" height="9" rx="2" fill="${row.color}"/>`;
-    svg += `<text x="${lx + 13}" y="${ly}" font-size="9" fill="#94a3b8">${row.label}</text>`;
+    svg += `<text x="${lx + 13}" y="${ly}" font-size="9" fill="#64748b">${row.label}</text>`;
   });
 
   svg += '</svg>';
@@ -1371,7 +1379,7 @@ function renderPriorityAgeChart(container, data, opts = {}) {
 
 function renderCFDChart(container, data, opts = {}) {
   if (!data.length) {
-    container.innerHTML = '<div style="font-size:.75rem;color:#64748b;padding:.5rem">No data available</div>';
+    container.innerHTML = '<div style="font-size:.75rem;color:var(--muted, #64748b);padding:.5rem">No data available</div>';
     return;
   }
 
@@ -1393,7 +1401,7 @@ function renderCFDChart(container, data, opts = {}) {
   for (let i = 0; i <= 4; i++) {
     const y = PAD.top + chartH * (1 - i / 4);
     const val = Math.round((maxVal * i) / 4);
-    svg += `<line x1="${PAD.left}" y1="${y}" x2="${PAD.left + chartW}" y2="${y}" stroke="#334155" stroke-width="1"/>`;
+    svg += `<line x1="${PAD.left}" y1="${y}" x2="${PAD.left + chartW}" y2="${y}" stroke="#334155" stroke-width="0.5" stroke-dasharray="4,4" opacity="0.6"/>`;
     svg += `<text x="${PAD.left - 4}" y="${y + 4}" text-anchor="end" font-size="9" fill="#64748b">${val}</text>`;
   }
 
@@ -1404,16 +1412,16 @@ function renderCFDChart(container, data, opts = {}) {
 
   // Closed line
   const closedPts = data.map((d, i) => `${px(i)},${py(d.closed)}`).join(' ');
-  svg += `<polyline points="${closedPts}" fill="none" stroke="#10b981" stroke-width="2"/>`;
+  svg += `<polyline points="${closedPts}" fill="none" stroke="#10b981" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>`;
 
   // Arrival line
   const arrivedPts = data.map((d, i) => `${px(i)},${py(d.arrived)}`).join(' ');
-  svg += `<polyline points="${arrivedPts}" fill="none" stroke="#6366f1" stroke-width="2"/>`;
+  svg += `<polyline points="${arrivedPts}" fill="none" stroke="#6366f1" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>`;
 
-  // Dots
+  // Dots with tooltips
   data.forEach((d, i) => {
-    svg += `<circle cx="${px(i)}" cy="${py(d.arrived)}" r="2.5" fill="#6366f1"/>`;
-    svg += `<circle cx="${px(i)}" cy="${py(d.closed)}" r="2.5" fill="#10b981"/>`;
+    svg += `<circle cx="${px(i)}" cy="${py(d.arrived)}" r="2.5" fill="#6366f1"><title>${d.label}: ${d.arrived} arrived</title></circle>`;
+    svg += `<circle cx="${px(i)}" cy="${py(d.closed)}" r="2.5" fill="#10b981"><title>${d.label}: ${d.closed} closed</title></circle>`;
   });
 
   // Current WIP annotation (last point gap)
@@ -1436,12 +1444,57 @@ function renderCFDChart(container, data, opts = {}) {
   // Legend
   const ly = H - 8;
   svg += `<line x1="${PAD.left}" y1="${ly - 3}" x2="${PAD.left + 12}" y2="${ly - 3}" stroke="#6366f1" stroke-width="2"/>`;
-  svg += `<text x="${PAD.left + 16}" y="${ly}" font-size="9" fill="#94a3b8">Arrived (cumul.)</text>`;
+  svg += `<text x="${PAD.left + 16}" y="${ly}" font-size="9" fill="#64748b">Arrived (cumul.)</text>`;
   svg += `<line x1="${PAD.left + 110}" y1="${ly - 3}" x2="${PAD.left + 122}" y2="${ly - 3}" stroke="#10b981" stroke-width="2"/>`;
-  svg += `<text x="${PAD.left + 126}" y="${ly}" font-size="9" fill="#94a3b8">Closed (cumul.)</text>`;
+  svg += `<text x="${PAD.left + 126}" y="${ly}" font-size="9" fill="#64748b">Closed (cumul.)</text>`;
   svg += `<rect x="${PAD.left + 230}" y="${ly - 9}" width="9" height="9" rx="2" fill="#f59e0b" opacity="0.4"/>`;
-  svg += `<text x="${PAD.left + 243}" y="${ly}" font-size="9" fill="#94a3b8">WIP band</text>`;
+  svg += `<text x="${PAD.left + 243}" y="${ly}" font-size="9" fill="#64748b">WIP band</text>`;
 
   svg += '</svg>';
   container.innerHTML = svg;
+}
+
+// ─── Theme helpers ────────────────────────────────────────────────────────────
+
+function getTheme() {
+  return new Promise(resolve =>
+    chrome.storage.local.get('theme', r => resolve(r.theme || 'dark'))
+  )
+}
+
+function setTheme(theme) {
+  return new Promise(resolve =>
+    chrome.storage.local.set({ theme }, resolve)
+  )
+}
+
+function applyTheme(theme) {
+  document.documentElement.setAttribute('data-theme', theme)
+}
+
+async function initTheme() {
+  const theme = await getTheme()
+  applyTheme(theme)
+  return theme
+}
+
+async function toggleTheme() {
+  const current = await getTheme()
+  const next = current === 'dark' ? 'light' : 'dark'
+  await setTheme(next)
+  applyTheme(next)
+  return next
+}
+
+// Ctrl+Shift+T keyboard shortcut for theme toggle (on pages with a document)
+if (typeof document !== 'undefined') {
+  document.addEventListener('keydown', e => {
+    if (e.ctrlKey && e.shiftKey && e.key === 'T') {
+      e.preventDefault()
+      toggleTheme().then(next => {
+        const btn = document.getElementById('theme-btn')
+        if (btn) btn.textContent = next === 'dark' ? '☀' : '☾'
+      })
+    }
+  })
 }

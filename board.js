@@ -3,6 +3,11 @@
 document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('refresh-btn').addEventListener('click', triggerRefresh);
   document.getElementById('settings-btn').addEventListener('click', () => chrome.runtime.openOptionsPage());
+
+  // Theme toggle
+  const themeBtn = document.getElementById('theme-btn')
+  initTheme().then(t => { themeBtn.textContent = t === 'dark' ? '☀' : '☾' })
+  themeBtn.addEventListener('click', () => toggleTheme().then(t => { themeBtn.textContent = t === 'dark' ? '☀' : '☾' }))
 });
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -107,10 +112,10 @@ async function buildOverviewPanel(cachedData) {
         <div class="metric-chart">
           <h3 class="chart-title">Arrival Rate (items/week) <span class="chart-info">?<span class="chart-tip">How many new items entered the board each week. A rising arrival rate with flat throughput signals growing WIP and potential bottlenecks.</span></span></h3>
           <div class="metric-kpis">
-            <div class="kpi"><div class="kv" style="color:#60a5fa">${stats.last7}</div><div class="kl">this wk</div></div>
-            <div class="kpi"><div class="kv" style="color:#94a3b8">${stats.last30}</div><div class="kl">30d</div></div>
-            <div class="kpi"><div class="kv" style="color:#94a3b8">${stats.avgPerWeek}</div><div class="kl">avg/wk</div></div>
-            <div class="kpi" style="align-self:center"><span class="trend-badge ${trendClass}">${trendText}</span></div>
+            <div class="kpi"><div class="kv kv-arrival">${stats.last7}</div><div class="kl">this wk</div></div>
+            <div class="kpi"><div class="kv kv-secondary">${stats.last30}</div><div class="kl">30d</div></div>
+            <div class="kpi"><div class="kv kv-secondary">${stats.avgPerWeek}</div><div class="kl">avg/wk</div></div>
+            <div class="kpi kpi-center"><span class="trend-badge ${trendClass}">${trendText}</span></div>
           </div>
           <div id="ov-arrival-chart"></div>
         </div>
@@ -120,7 +125,7 @@ async function buildOverviewPanel(cachedData) {
           <div id="ov-throughput-chart"></div>
         </div>
       </div>
-      <div id="ov-burndown-row" style="display:none;margin-top:.35rem"></div>
+      <div id="ov-burndown-row" class="burndown-hidden"></div>
     </div>
   `;
 
@@ -144,10 +149,10 @@ async function buildOverviewPanel(cachedData) {
     card.innerHTML = `
       <div class="pod-card-name">${escHtml(pod.name)}</div>
       <div class="pod-card-stats">
-        <div class="pod-stat"><div class="ps-label">Triage</div><div class="ps-val" style="color:#6366f1">${pTriage}</div></div>
-        <div class="pod-stat"><div class="ps-label">WIP</div><div class="ps-val" style="color:#f59e0b">${pWip}</div></div>
-        <div class="pod-stat"><div class="ps-label">Ready</div><div class="ps-val" style="color:#10b981">${pRelease}</div></div>
-        <div class="pod-stat"><div class="ps-label">Aged >90d</div><div class="ps-val" style="color:#ef4444">${pAged}</div></div>
+        <div class="pod-stat"><div class="ps-label">Triage</div><div class="ps-val kv-triage">${pTriage}</div></div>
+        <div class="pod-stat"><div class="ps-label">WIP</div><div class="ps-val kv-wip">${pWip}</div></div>
+        <div class="pod-stat"><div class="ps-label">Ready</div><div class="ps-val kv-throughput">${pRelease}</div></div>
+        <div class="pod-stat"><div class="ps-label">Aged >90d</div><div class="ps-val kv-aged">${pAged}</div></div>
       </div>
       <div class="pod-card-footer">
         <span class="pod-arr">↑${pStats.last7} this wk &nbsp;${pTrend} vs prev &nbsp;·&nbsp; avg ${pStats.avgPerWeek}/wk</span>
@@ -172,7 +177,7 @@ async function buildOverviewPanel(cachedData) {
   // Aggregate charts — total across all pods
   renderBarChart(panel.querySelector('#ov-arrival-chart'), [
     { label: 'Items arrived', color: '#6366f1', data: arrival }
-  ], { width: 500, height: 140 });
+  ], { width: 500, height: 140, avgLine: { value: +stats.avgPerWeek, label: 'avg', color: '#60a5fa' } });
 
   const tpLast7  = throughput[throughput.length-1]?.count || 0;
   const tpPrev7  = throughput[throughput.length-2]?.count || 0;
@@ -180,19 +185,19 @@ async function buildOverviewPanel(cachedData) {
   const tpAvg    = throughput.length ? +(throughput.reduce((s,w) => s+w.count, 0) / throughput.length).toFixed(1) : 0;
   const tpDiff   = tpLast7 - tpPrev7;
   panel.querySelector('#ov-tp-kpis').innerHTML = `
-    <div class="kpi"><div class="kv" style="color:#10b981">${tpLast7}</div><div class="kl">this week</div></div>
-    <div class="kpi"><div class="kv" style="color:#94a3b8">${tpLast30}</div><div class="kl">last 30d</div></div>
-    <div class="kpi"><div class="kv" style="color:#94a3b8">${tpAvg}</div><div class="kl">avg/wk</div></div>
-    <div class="kpi" style="align-self:center"><span class="trend-badge ${tpDiff>0?'trend-up-good':tpDiff<0?'trend-up-bad':'trend-neutral'}">${tpDiff>0?`↑${tpDiff}`:tpDiff<0?`↓${Math.abs(tpDiff)}`:'→'} vs prev</span></div>
+    <div class="kpi"><div class="kv kv-throughput">${tpLast7}</div><div class="kl">this week</div></div>
+    <div class="kpi"><div class="kv kv-secondary">${tpLast30}</div><div class="kl">last 30d</div></div>
+    <div class="kpi"><div class="kv kv-secondary">${tpAvg}</div><div class="kl">avg/wk</div></div>
+    <div class="kpi kpi-center"><span class="trend-badge ${tpDiff>0?'trend-up-good':tpDiff<0?'trend-up-bad':'trend-neutral'}">${tpDiff>0?`↑${tpDiff}`:tpDiff<0?`↓${Math.abs(tpDiff)}`:'→'} vs prev</span></div>
   `;
   renderBarChart(panel.querySelector('#ov-throughput-chart'), [
     { label: 'Items resolved', color: '#10b981', data: throughput }
-  ], { width: 500, height: 140 });
+  ], { width: 500, height: 140, avgLine: { value: +tpAvg, label: 'avg', color: '#10b981' } });
 
   // Per-pod flow charts — one arrival + throughput chart per pod
   const perPodSection = document.createElement('div');
-  perPodSection.style.cssText = 'margin:.35rem 1.25rem .75rem';
-  perPodSection.innerHTML = '<h2 style="font-size:.85rem;font-weight:700;margin-bottom:.4rem;color:#e2e8f0">📊 Flow by Pod</h2><div id="per-pod-charts"></div>';
+  perPodSection.className = 'per-pod-section'
+  perPodSection.innerHTML = '<h2 class="per-pod-heading">📊 Flow by Pod</h2><div id="per-pod-charts"></div>';
   panel.appendChild(perPodSection);
 
   const perPodContainer = perPodSection.querySelector('#per-pod-charts');
@@ -208,29 +213,30 @@ async function buildOverviewPanel(cachedData) {
 
     const block = document.createElement('div');
     block.dataset.podId = pod.id;
-    block.style.cssText = `background:var(--surface);border:1px solid var(--border);border-left:3px solid ${color};border-radius:10px;padding:.5rem .75rem;margin-bottom:.4rem`;
+    block.className = 'pod-flow-block'
+    block.style.borderLeftColor = color
     block.innerHTML = `
       <div class="pod-block-header">
-        <div style="font-size:.82rem;font-weight:700;color:#e2e8f0">${escHtml(pod.name)}</div>
+        <div class="pod-block-name">${escHtml(pod.name)}</div>
         <span class="pod-toggle collapsed">▼</span>
       </div>
       <div class="pod-block-body collapsed">
-        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:.5rem" class="pod-charts-grid">
+        <div class="pod-charts-grid">
           <div>
-            <div style="font-size:.68rem;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-bottom:.2rem">Arrival Rate</div>
-            <div style="display:flex;gap:.5rem;margin-bottom:.2rem;flex-wrap:wrap">
-              <div class="kpi"><div class="kv" style="color:#60a5fa">${pStats.last7}</div><div class="kl">this wk</div></div>
-              <div class="kpi"><div class="kv" style="color:#94a3b8">${pStats.last30}</div><div class="kl">30d</div></div>
-              <div class="kpi"><div class="kv" style="color:#94a3b8">${pStats.avgPerWeek}</div><div class="kl">avg/wk</div></div>
+            <div class="chart-subtitle">Arrival Rate</div>
+            <div class="kpi-row">
+              <div class="kpi"><div class="kv kv-arrival">${pStats.last7}</div><div class="kl">this wk</div></div>
+              <div class="kpi"><div class="kv kv-secondary">${pStats.last30}</div><div class="kl">30d</div></div>
+              <div class="kpi"><div class="kv kv-secondary">${pStats.avgPerWeek}</div><div class="kl">avg/wk</div></div>
             </div>
             <div class="pod-arr-chart-${pod.id}"></div>
           </div>
           <div>
-            <div style="font-size:.68rem;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-bottom:.2rem">Throughput</div>
-            <div style="display:flex;gap:.5rem;margin-bottom:.2rem;flex-wrap:wrap">
-              <div class="kpi"><div class="kv" style="color:#10b981">${pTpLast7}</div><div class="kl">this wk</div></div>
-              <div class="kpi"><div class="kv" style="color:#94a3b8">${pTpLast30}</div><div class="kl">30d</div></div>
-              <div class="kpi"><div class="kv" style="color:#94a3b8">${pTpAvg}</div><div class="kl">avg/wk</div></div>
+            <div class="chart-subtitle">Throughput</div>
+            <div class="kpi-row">
+              <div class="kpi"><div class="kv kv-throughput">${pTpLast7}</div><div class="kl">this wk</div></div>
+              <div class="kpi"><div class="kv kv-secondary">${pTpLast30}</div><div class="kl">30d</div></div>
+              <div class="kpi"><div class="kv kv-secondary">${pTpAvg}</div><div class="kl">avg/wk</div></div>
             </div>
             <div class="pod-tp-chart-${pod.id}"></div>
           </div>
@@ -248,10 +254,10 @@ async function buildOverviewPanel(cachedData) {
 
     renderBarChart(block.querySelector(`.pod-arr-chart-${pod.id}`), [
       { label: 'Arrived', color, data: pArrival }
-    ], { width: 420, height: 110 });
+    ], { width: 420, height: 110, avgLine: { value: +pStats.avgPerWeek, label: 'avg', color } });
     renderBarChart(block.querySelector(`.pod-tp-chart-${pod.id}`), [
       { label: 'Resolved', color: '#10b981', data: pThroughput }
-    ], { width: 420, height: 110 });
+    ], { width: 420, height: 110, avgLine: { value: pTpAvg, label: 'avg', color: '#10b981' } });
   });
 
   // ── Optional charts ──
@@ -282,7 +288,7 @@ async function buildOverviewPanel(cachedData) {
       const podTpByPerson = calcWeeklyThroughputByPerson(pod.items || [], 8);
       if (!podTpByPerson.people.length) continue;
       const tpDiv = document.createElement('div');
-      tpDiv.innerHTML = '<div style="font-size:.68rem;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-bottom:.2rem">Throughput per Person</div><div class="pod-tp-person"></div>';
+      tpDiv.innerHTML = '<div class="chart-subtitle">Throughput per Person</div><div class="pod-tp-person"></div>';
       block.querySelector('.pod-charts-grid').appendChild(tpDiv);
       renderStackedBarChart(tpDiv.querySelector('.pod-tp-person'), podTpByPerson.labels, podTpByPerson.people, { width: 400, height: 140 });
     }
@@ -319,7 +325,7 @@ async function buildOverviewPanel(cachedData) {
       const podClosedByPerson = calcClosedByPerson(pod.items || []);
       if (!podClosedByPerson.length) continue;
       const cbpDiv = document.createElement('div');
-      cbpDiv.innerHTML = '<div style="font-size:.68rem;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-bottom:.2rem">Items Closed by Person</div><div class="pod-closed-person"></div>';
+      cbpDiv.innerHTML = '<div class="chart-subtitle">Items Closed by Person</div><div class="pod-closed-person"></div>';
       block.querySelector('.pod-charts-grid').appendChild(cbpDiv);
       renderClosedByPersonChart(cbpDiv.querySelector('.pod-closed-person'), podClosedByPerson, { width: 400 });
     }
@@ -345,7 +351,7 @@ async function buildOverviewPanel(cachedData) {
       const podResolvedByPerson = calcResolvedByPerson(pod.items || []);
       if (!podResolvedByPerson.length) continue;
       const rbpDiv = document.createElement('div');
-      rbpDiv.innerHTML = '<div style="font-size:.68rem;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-bottom:.2rem">Items Resolved by Person</div><div class="pod-resolved-person"></div>';
+      rbpDiv.innerHTML = '<div class="chart-subtitle">Items Resolved by Person</div><div class="pod-resolved-person"></div>';
       block.querySelector('.pod-charts-grid').appendChild(rbpDiv);
       renderClosedByPersonChart(rbpDiv.querySelector('.pod-resolved-person'), podResolvedByPerson, { width: 400 });
     }
@@ -390,7 +396,7 @@ async function buildOverviewPanel(cachedData) {
 
       if (oc.cycleTimeInProgress) {
         const div = document.createElement('div');
-        div.innerHTML = '<div style="font-size:.68rem;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-bottom:.2rem">Cycle: In Progress → Closed</div><div class="pod-ct-ip"></div>';
+        div.innerHTML = '<div class="chart-subtitle">Cycle: In Progress → Closed</div><div class="pod-ct-ip"></div>';
         podGrid.appendChild(div);
         const ipData = podCtData.filter(d => d.inProgressToClose != null).map(d => ({
           id: d.id, type: d.type, url: d.url, days: d.inProgressToClose, closedDate: d.closedDate
@@ -400,7 +406,7 @@ async function buildOverviewPanel(cachedData) {
 
       if (oc.cycleTimeArrival) {
         const div = document.createElement('div');
-        div.innerHTML = '<div style="font-size:.68rem;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-bottom:.2rem">Cycle: Arrival → Closed</div><div class="pod-ct-arr"></div>';
+        div.innerHTML = '<div class="chart-subtitle">Cycle: Arrival → Closed</div><div class="pod-ct-arr"></div>';
         podGrid.appendChild(div);
         const arrData = podCtData.filter(d => d.arrivalToClose != null).map(d => ({
           id: d.id, type: d.type, url: d.url, days: d.arrivalToClose, closedDate: d.closedDate
@@ -426,7 +432,7 @@ async function buildOverviewPanel(cachedData) {
       if (!pod) continue;
       const podWip = calcWeeklyWIP(pod.items || [], 8);
       const d = document.createElement('div');
-      d.innerHTML = '<div style="font-size:.68rem;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-bottom:.2rem">WIP Trend</div><div class="pod-wip"></div>';
+      d.innerHTML = '<div class="chart-subtitle">WIP Trend</div><div class="pod-wip"></div>';
       block.querySelector('.pod-charts-grid').appendChild(d);
       renderLineChart(d.querySelector('.pod-wip'), [{ label: 'WIP', color: '#f59e0b', data: podWip }], { width: 400, height: 120 });
     }
@@ -448,7 +454,7 @@ async function buildOverviewPanel(cachedData) {
       if (!pod) continue;
       const podAge = calcAgeDistribution(pod.items || []);
       const d = document.createElement('div');
-      d.innerHTML = '<div style="font-size:.68rem;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-bottom:.2rem">Age Distribution</div><div class="pod-age"></div>';
+      d.innerHTML = '<div class="chart-subtitle">Age Distribution</div><div class="pod-age"></div>';
       block.querySelector('.pod-charts-grid').appendChild(d);
       renderBarChart(d.querySelector('.pod-age'), [{ label: 'Items', color: '#8b5cf6', data: podAge }], { width: 400, height: 120 });
     }
@@ -469,7 +475,7 @@ async function buildOverviewPanel(cachedData) {
         { label: 'items measured', value: eff.count, color: '#94a3b8' }
       ]);
     } else {
-      div.querySelector('.flow-eff-metrics').innerHTML = '<div style="font-size:.75rem;color:#64748b;padding:.25rem">Insufficient data</div>';
+      div.querySelector('.flow-eff-metrics').innerHTML = '<div class="no-data-msg">Insufficient data</div>';
     }
 
     for (const block of perPodContainer.querySelectorAll('[data-pod-id]')) {
@@ -480,7 +486,7 @@ async function buildOverviewPanel(cachedData) {
       const podEff = calcFlowEfficiency(podCtData);
       if (!podEff) continue;
       const d = document.createElement('div');
-      d.innerHTML = '<div style="font-size:.68rem;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-bottom:.2rem">Flow Efficiency</div><div class="pod-eff"></div>';
+      d.innerHTML = '<div class="chart-subtitle">Flow Efficiency</div><div class="pod-eff"></div>';
       block.querySelector('.pod-charts-grid').appendChild(d);
       renderMetricCard(d.querySelector('.pod-eff'), [
         { label: 'avg', value: podEff.pct + '%', color: podEff.pct >= 40 ? '#22c55e' : podEff.pct >= 20 ? '#f59e0b' : '#ef4444' },
@@ -503,7 +509,7 @@ async function buildOverviewPanel(cachedData) {
       if (!pod) continue;
       const podStale = calcStaleItems(pod.items || []);
       const d = document.createElement('div');
-      d.innerHTML = `<div style="font-size:.68rem;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-bottom:.2rem">Stale Items (14d+) — ${podStale.total}</div><div class="pod-stale"></div>`;
+      d.innerHTML = `<div class="chart-subtitle">Stale Items (14d+) — ${podStale.total}</div><div class="pod-stale"></div>`;
       block.querySelector('.pod-charts-grid').appendChild(d);
       renderStaleItemsChart(d.querySelector('.pod-stale'), podStale, { width: 400 });
     }
@@ -525,7 +531,7 @@ async function buildOverviewPanel(cachedData) {
       if (!pod) continue;
       const podBug = calcBugRatioTrend(pod.items || [], 8);
       const d = document.createElement('div');
-      d.innerHTML = '<div style="font-size:.68rem;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-bottom:.2rem">Bug Ratio Trend (%)</div><div class="pod-bug"></div>';
+      d.innerHTML = '<div class="chart-subtitle">Bug Ratio Trend (%)</div><div class="pod-bug"></div>';
       block.querySelector('.pod-charts-grid').appendChild(d);
       renderBarChart(d.querySelector('.pod-bug'), [{ label: 'Bug %', color: '#ef4444', data: podBug.map(r => ({ label: r.label, count: r.pct })) }], { width: 400, height: 120 });
     }
@@ -548,11 +554,11 @@ async function buildOverviewPanel(cachedData) {
       const weeklyHtml = pred.weekly.map(w => {
         const diff = w.count - pred.mean;
         const col = Math.abs(diff) > pred.stdDev ? '#ef4444' : '#94a3b8';
-        return `<div style="display:flex;justify-content:space-between;padding:.1rem .3rem;font-size:.68rem"><span style="color:#64748b">${w.label}</span><span style="color:${col};font-weight:600">${w.count}</span></div>`;
+        return `<div class="pred-weekly-row"><span class="pred-weekly-label">${w.label}</span><span class="pred-weekly-val" style="color:${col}">${w.count}</span></div>`;
       }).join('');
-      div.querySelector('.tp-pred-weekly').innerHTML = `<div style="margin-top:.35rem;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:.25rem .1rem;max-width:200px;margin-left:auto;margin-right:auto">${weeklyHtml}</div>`;
+      div.querySelector('.tp-pred-weekly').innerHTML = `<div class="pred-weekly-container">${weeklyHtml}</div>`;
     } else {
-      div.querySelector('.tp-pred-metrics').innerHTML = '<div style="font-size:.75rem;color:#64748b;padding:.25rem">Insufficient data</div>';
+      div.querySelector('.tp-pred-metrics').innerHTML = '<div class="no-data-msg">Insufficient data</div>';
     }
 
     for (const block of perPodContainer.querySelectorAll('[data-pod-id]')) {
@@ -561,7 +567,7 @@ async function buildOverviewPanel(cachedData) {
       const podPred = calcThroughputPredictability(pod.items || [], 8);
       if (!podPred) continue;
       const d = document.createElement('div');
-      d.innerHTML = '<div style="font-size:.68rem;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-bottom:.2rem">Predictability</div><div class="pod-pred"></div><div class="pod-pred-weekly"></div>';
+      d.innerHTML = '<div class="chart-subtitle">Predictability</div><div class="pod-pred"></div><div class="pod-pred-weekly"></div>';
       block.querySelector('.pod-charts-grid').appendChild(d);
       renderMetricCard(d.querySelector('.pod-pred'), [
         { label: 'rating', value: podPred.rating, color: podPred.ratingColor },
@@ -571,9 +577,9 @@ async function buildOverviewPanel(cachedData) {
       const podWeeklyHtml = podPred.weekly.map(w => {
         const diff = w.count - podPred.mean;
         const col = Math.abs(diff) > podPred.stdDev ? '#ef4444' : '#94a3b8';
-        return `<div style="display:flex;justify-content:space-between;padding:.1rem .3rem;font-size:.68rem"><span style="color:#64748b">${w.label}</span><span style="color:${col};font-weight:600">${w.count}</span></div>`;
+        return `<div class="pred-weekly-row"><span class="pred-weekly-label">${w.label}</span><span class="pred-weekly-val" style="color:${col}">${w.count}</span></div>`;
       }).join('');
-      d.querySelector('.pod-pred-weekly').innerHTML = `<div style="margin-top:.25rem;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:.25rem .1rem">${podWeeklyHtml}</div>`;
+      d.querySelector('.pod-pred-weekly').innerHTML = `<div class="pred-weekly-container-sm">${podWeeklyHtml}</div>`;
     }
   }
 
@@ -592,7 +598,7 @@ async function buildOverviewPanel(cachedData) {
       const podPrioAge = calcPriorityAgeDistribution(pod.items || []);
       if (!podPrioAge.priorities.length) continue;
       const d = document.createElement('div');
-      d.innerHTML = '<div style="font-size:.68rem;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-bottom:.2rem">Priority Age Distribution</div><div class="pod-prio-age"></div>';
+      d.innerHTML = '<div class="chart-subtitle">Priority Age Distribution</div><div class="pod-prio-age"></div>';
       block.querySelector('.pod-charts-grid').appendChild(d);
       renderPriorityAgeChart(d.querySelector('.pod-prio-age'), podPrioAge, { width: 400, height: 130 });
     }
@@ -612,7 +618,7 @@ async function buildOverviewPanel(cachedData) {
       if (!pod) continue;
       const podCfd = calcCumulativeFlow(pod.items || [], 12);
       const d = document.createElement('div');
-      d.innerHTML = '<div style="font-size:.68rem;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-bottom:.2rem">Cumulative Flow Diagram</div><div class="pod-cfd"></div>';
+      d.innerHTML = '<div class="chart-subtitle">Cumulative Flow Diagram</div><div class="pod-cfd"></div>';
       block.querySelector('.pod-charts-grid').appendChild(d);
       renderCFDChart(d.querySelector('.pod-cfd'), podCfd, { width: 400, height: 140 });
     }
@@ -626,8 +632,8 @@ async function buildOverviewPanel(cachedData) {
       if (bdRow) {
         bdRow.style.display = '';
         bdRow.innerHTML = `
-          <h3 style="font-size:.72rem;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-bottom:.25rem">Burndown by Target PI</h3>
-          <div style="margin-bottom:.5rem">
+          <h3 class="burndown-heading">Burndown by Target PI</h3>
+          <div class="burndown-selector-wrap">
             <select class="pi-selector" id="ov-pi-selector">
               ${piValues.map(pi => `<option value="${escHtml(pi)}">${escHtml(pi)}</option>`).join('')}
             </select>
@@ -658,8 +664,8 @@ async function buildOverviewPanel(cachedData) {
 
         const bdDiv = document.createElement('div');
         bdDiv.innerHTML = `
-          <div style="font-size:.68rem;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-bottom:.2rem">Burndown by Target PI</div>
-          <div style="margin-bottom:.3rem">
+          <div class="chart-subtitle">Burndown by Target PI</div>
+          <div class="burndown-selector-wrap-sm">
             <select class="pi-selector pod-pi-selector">
               ${podPIValues.map(pi => `<option value="${escHtml(pi)}">${escHtml(pi)}</option>`).join('')}
             </select>
@@ -698,7 +704,7 @@ function makeCard(item) {
   const priBadge = `<span class="badge badge-p${item.priority}">P${item.priority}</span>`;
   const asgn = item.assignee
     ? `<div class="mini-avatar" style="background:${assigneeColor(item.assignee)}">${initials(item.assignee)}</div><span>${item.assignee.split(' ')[0]}</span>`
-    : `<span style="opacity:.45">Unassigned</span>`;
+    : `<span class="text-faded">Unassigned</span>`;
   const tagsHtml = item.tags.length
     ? `<div class="card-tags">${item.tags.map(t=>`<span class="tag">${escHtml(t)}</span>`).join('')}</div>` : '';
 
@@ -789,8 +795,8 @@ function buildPodPanel(pod) {
     </div>
     <div class="stats-row">
       ${columnNames.map(col => `<div class="stat-card"><div class="label">${escHtml(col)}</div><div class="value" style="color:${getColumnColor(col)}">${byCol[col].length}</div></div>`).join('')}
-      <div class="stat-card"><div class="label">Aged &gt;90d</div><div class="value" style="color:#ef4444">${active.filter(i=>ageDays(i)>=90).length}</div></div>
-      <div class="stat-card"><div class="label">Total</div><div class="value" style="color:#e2e8f0">${active.length}</div></div>
+      <div class="stat-card"><div class="label">Aged &gt;90d</div><div class="value kv-aged">${active.filter(i=>ageDays(i)>=90).length}</div></div>
+      <div class="stat-card"><div class="label">Total</div><div class="value kv-total">${active.length}</div></div>
     </div>
     <div class="team-row">${teamCardsHtml}</div>
     <div class="metrics-section">
@@ -799,20 +805,20 @@ function buildPodPanel(pod) {
         <div class="metric-chart">
           <h3>Arrival Rate</h3>
           <div class="metric-kpis">
-            <div class="kpi"><div class="kv" style="color:#60a5fa">${stats.last7}</div><div class="kl">this week</div></div>
-            <div class="kpi"><div class="kv" style="color:#94a3b8">${stats.last30}</div><div class="kl">last 30d</div></div>
-            <div class="kpi"><div class="kv" style="color:#94a3b8">${stats.avgPerWeek}</div><div class="kl">avg/wk</div></div>
-            <div class="kpi" style="align-self:center"><span class="trend-badge ${trendClass}">${trendText}</span></div>
+            <div class="kpi"><div class="kv kv-arrival">${stats.last7}</div><div class="kl">this week</div></div>
+            <div class="kpi"><div class="kv kv-secondary">${stats.last30}</div><div class="kl">last 30d</div></div>
+            <div class="kpi"><div class="kv kv-secondary">${stats.avgPerWeek}</div><div class="kl">avg/wk</div></div>
+            <div class="kpi kpi-center"><span class="trend-badge ${trendClass}">${trendText}</span></div>
           </div>
           <div class="pod-arrival-chart"></div>
         </div>
         <div class="metric-chart">
           <h3>Throughput</h3>
           <div class="metric-kpis">
-            <div class="kpi"><div class="kv" style="color:#10b981">${tpLast7}</div><div class="kl">this week</div></div>
-            <div class="kpi"><div class="kv" style="color:#94a3b8">${tpLast30}</div><div class="kl">last 30d</div></div>
-            <div class="kpi"><div class="kv" style="color:#94a3b8">${tpAvgPod}</div><div class="kl">avg/wk</div></div>
-            <div class="kpi" style="align-self:center"><span class="trend-badge ${tpDiff>0?'trend-up-good':tpDiff<0?'trend-up-bad':'trend-neutral'}">${tpDiff>0?`↑${tpDiff}`:tpDiff<0?`↓${Math.abs(tpDiff)}`:'→'} vs prev</span></div>
+            <div class="kpi"><div class="kv kv-throughput">${tpLast7}</div><div class="kl">this week</div></div>
+            <div class="kpi"><div class="kv kv-secondary">${tpLast30}</div><div class="kl">last 30d</div></div>
+            <div class="kpi"><div class="kv kv-secondary">${tpAvgPod}</div><div class="kl">avg/wk</div></div>
+            <div class="kpi kpi-center"><span class="trend-badge ${tpDiff>0?'trend-up-good':tpDiff<0?'trend-up-bad':'trend-neutral'}">${tpDiff>0?`↑${tpDiff}`:tpDiff<0?`↓${Math.abs(tpDiff)}`:'→'} vs prev</span></div>
           </div>
           <div class="pod-throughput-chart"></div>
         </div>
@@ -835,7 +841,7 @@ function buildPodPanel(pod) {
         </div>`;
       }).join('')}
     </div>
-    ${pod.error ? `<div style="margin:0 1.25rem 1rem;padding:.5rem .85rem;background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.3);border-radius:8px;font-size:.78rem;color:#fca5a5">⚠ Last fetch failed: ${escHtml(pod.error)}</div>` : ''}
+    ${pod.error ? `<div class="pod-error-banner">⚠ Last fetch failed: ${escHtml(pod.error)}</div>` : ''}
   `;
 
   // ── Helper: update column counts ──
@@ -1018,8 +1024,8 @@ function buildPodPanel(pod) {
   });
 
   // Render charts
-  renderBarChart(panel.querySelector('.pod-arrival-chart'), [{ label:'Items arrived', color:'#6366f1', data:arrival }], { width:500, height:120 });
-  renderBarChart(panel.querySelector('.pod-throughput-chart'), [{ label:'Items resolved', color:'#10b981', data:throughput }], { width:500, height:120 });
+  renderBarChart(panel.querySelector('.pod-arrival-chart'), [{ label:'Items arrived', color:'#6366f1', data:arrival }], { width:500, height:120, avgLine: { value: +stats.avgPerWeek, label: 'avg', color: '#60a5fa' } });
+  renderBarChart(panel.querySelector('.pod-throughput-chart'), [{ label:'Items resolved', color:'#10b981', data:throughput }], { width:500, height:120, avgLine: { value: +tpAvgPod, label: 'avg', color: '#10b981' } });
 }
 
 // ─── Main render ──────────────────────────────────────────────────────────────
@@ -1028,6 +1034,10 @@ async function renderAll(data) {
   if (!data?.pods) return;
   const pods = Object.values(data.pods);
   if (!pods.length) { showBanner('No pods configured. Click ⚙ Settings to add pods.', 'err'); return; }
+
+  // Remove loading skeleton on first render
+  const skel = $('loading-skeleton')
+  if (skel) skel.remove()
 
   buildTabs(pods);
   await buildOverviewPanel(data);

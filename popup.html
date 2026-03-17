@@ -4,75 +4,105 @@
 <meta charset="UTF-8">
 <title>Kanban Manager</title>
 <style>
+  :root {
+    --bg: #0f172a; --surface: #1e293b; --surface2: #334155;
+    --text: #f1f5f9; --muted: #64748b; --border: #334155;
+    --header-bg: linear-gradient(135deg, #1e3a5f, #0f172a);
+    --accent: #1d4ed8;
+  }
+  [data-theme="light"] {
+    --bg: #f1f5f9; --surface: #ffffff; --surface2: #e2e8f0;
+    --text: #0f172a; --muted: #64748b; --border: #cbd5e1;
+    --header-bg: linear-gradient(135deg, #3b82f6, #1e40af);
+    --accent: #2563eb;
+  }
   * { box-sizing: border-box; margin: 0; padding: 0; }
+  :focus-visible { outline: 2px solid #3b82f6; outline-offset: 2px; }
   body {
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-    background: #0f172a; color: #f1f5f9;
-    width: 380px; min-height: 200px;
+    background: var(--bg); color: var(--text);
+    width: 380px; min-width: 320px; max-width: 420px; min-height: 200px;
   }
   header {
-    background: linear-gradient(135deg, #1e3a5f, #0f172a);
+    background: var(--header-bg);
     padding: 0.75rem 1rem 0.65rem;
-    border-bottom: 1px solid #334155;
+    border-bottom: 1px solid var(--border);
     display: flex; align-items: center; justify-content: space-between;
   }
-  header h1 { font-size: 1rem; font-weight: 700; }
-  header .subtitle { font-size: 0.65rem; color: #64748b; margin-top: 0.1rem; }
+  header h1 { font-size: 1rem; font-weight: 700; color: #fff; }
+  header .subtitle { font-size: 0.75rem; color: rgba(255,255,255,.6); margin-top: 0.1rem; }
   .open-btn {
-    background: #1d4ed8; color: #fff; border: none; border-radius: 6px;
-    padding: 0.3rem 0.65rem; font-size: 0.72rem; cursor: pointer; white-space: nowrap;
+    background: rgba(255,255,255,.15); color: #fff; border: none; border-radius: 6px;
+    padding: 0.3rem 0.65rem; font-size: 0.75rem; cursor: pointer; white-space: nowrap;
   }
-  .open-btn:hover { background: #2563eb; }
+  .open-btn:hover { background: rgba(255,255,255,.25); }
 
   /* No PAT */
   .setup-prompt { padding: 1.25rem 1rem; text-align: center; }
-  .setup-prompt p { font-size: 0.82rem; color: #94a3b8; margin-bottom: 0.85rem; }
-  .setup-btn { background: #1d4ed8; color: #fff; border: none; border-radius: 8px; padding: 0.6rem 1.25rem; font-size: 0.85rem; cursor: pointer; }
+  .setup-prompt p { font-size: 0.82rem; color: var(--muted); margin-bottom: 0.85rem; }
+  .setup-btn { background: var(--accent); color: #fff; border: none; border-radius: 8px; padding: 0.6rem 1.25rem; font-size: 0.85rem; cursor: pointer; }
 
   /* Aggregate stats */
   .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 0.45rem; padding: 0.65rem 0.75rem 0; }
-  .stat { background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 0.5rem 0.7rem; }
-  .stat .label { font-size: 0.58rem; text-transform: uppercase; letter-spacing: 0.05em; color: #64748b; margin-bottom: 0.15rem; }
-  .stat .value { font-size: 1.4rem; font-weight: 700; line-height: 1; }
-  .stat .sub { font-size: 0.6rem; color: #64748b; margin-top: 0.1rem; }
+  .stat { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 0.5rem 0.7rem; }
+  .stat .label { font-size: 0.625rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin-bottom: 0.15rem; }
+  .stat .value { font-size: 1.5rem; font-weight: 700; line-height: 1; }
+  .stat .sub { font-size: 0.625rem; color: var(--muted); margin-top: 0.1rem; }
   .c-triage { color: #6366f1; } .c-wip { color: #f59e0b; }
   .c-release { color: #10b981; } .c-aged { color: #ef4444; }
 
   /* Arrival rate */
-  .arrival { margin: 0.55rem 0.75rem 0; background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 0.55rem 0.8rem; }
-  .arrival .label { font-size: 0.58rem; text-transform: uppercase; letter-spacing: 0.05em; color: #64748b; margin-bottom: 0.35rem; }
+  .arrival { margin: 0.55rem 0.75rem 0; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 0.55rem 0.8rem; }
+  .arrival .label { font-size: 0.625rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin-bottom: 0.35rem; }
   .arrival-row { display: flex; align-items: center; gap: 0.65rem; }
   .arrival-big { font-size: 1.5rem; font-weight: 700; color: #60a5fa; line-height: 1; }
-  .arrival-detail { font-size: 0.67rem; color: #94a3b8; }
+  .sparkline { flex-shrink: 0; }
+  .sparkline polyline { fill: none; stroke: #60a5fa; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+  .sparkline .spark-fill { fill: rgba(96,165,250,.15); stroke: none; }
+  .sparkline .spark-dot { fill: #60a5fa; }
+  .arrival-detail { font-size: 0.75rem; color: var(--muted); }
   .arrival-detail div { margin-bottom: 0.08rem; }
-  .trend-up { color: #ef4444; } .trend-down { color: #22c55e; } .trend-same { color: #94a3b8; }
+  .trend-up { color: #ef4444; } .trend-down { color: #22c55e; } .trend-same { color: var(--muted); }
 
   /* Pod summary rows */
   .pods-section { padding: 0.55rem 0.75rem 0; }
-  .pods-section .label { font-size: 0.58rem; text-transform: uppercase; letter-spacing: 0.05em; color: #64748b; margin-bottom: 0.4rem; }
+  .pods-section .label { font-size: 0.625rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin-bottom: 0.4rem; }
   .pod-row {
     display: flex; align-items: center; gap: 0.45rem;
-    padding: 0.3rem 0; border-bottom: 1px solid #1e293b;
+    padding: 0.3rem 0; border-bottom: 1px solid var(--border);
   }
   .pod-row:last-child { border-bottom: none; }
   .pod-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
-  .pod-name { font-size: 0.73rem; flex: 1; font-weight: 600; color: #e2e8f0; }
+  .pod-name { font-size: 0.75rem; flex: 1; font-weight: 600; color: var(--text); }
   .pod-chips { display: flex; gap: 0.25rem; flex-wrap: wrap; justify-content: flex-end; }
-  .chip { font-size: 0.58rem; padding: 0.08rem 0.35rem; border-radius: 4px; font-weight: 600; white-space: nowrap; }
+  .chip { font-size: 0.625rem; padding: 0.1rem .4rem; border-radius: 4px; font-weight: 600; white-space: nowrap; }
   .chip-triage { background: rgba(99,102,241,.15); color: #a5b4fc; }
   .chip-wip    { background: rgba(245,158,11,.15); color: #fcd34d; }
   .chip-arr    { background: rgba(96,165,250,.15); color: #93c5fd; }
   .chip-aged   { background: rgba(239,68,68,.15);  color: #fca5a5; }
 
-  .error-bar { margin: 0.45rem 0.75rem 0; background: rgba(239,68,68,.1); border: 1px solid rgba(239,68,68,.3); border-radius: 6px; padding: 0.35rem 0.55rem; font-size: 0.65rem; color: #fca5a5; display: none; }
+  .error-bar { margin: 0.45rem 0.75rem 0; background: rgba(239,68,68,.1); border: 1px solid rgba(239,68,68,.3); border-radius: 6px; padding: 0.35rem 0.55rem; font-size: 0.75rem; color: #fca5a5; display: none; }
 
   /* Footer */
-  .footer { padding: 0.55rem 0.75rem 0.6rem; display: flex; align-items: center; justify-content: space-between; margin-top: 0.35rem; border-top: 1px solid #1e293b; }
-  .last-updated { font-size: 0.62rem; color: #475569; }
-  .refresh-btn { background: none; border: 1px solid #334155; color: #64748b; border-radius: 6px; padding: 0.22rem 0.55rem; font-size: 0.65rem; cursor: pointer; }
+  .footer { padding: 0.55rem 0.75rem 0.6rem; display: flex; align-items: center; justify-content: space-between; margin-top: 0.35rem; border-top: 1px solid var(--border); }
+  .last-updated { font-size: 0.625rem; color: var(--muted); }
+  .refresh-btn { background: none; border: 1px solid var(--border); color: var(--muted); border-radius: 6px; padding: 0.22rem 0.55rem; font-size: 0.75rem; cursor: pointer; }
   .refresh-btn:hover { border-color: #3b82f6; color: #60a5fa; }
   .refresh-btn.spinning { animation: spin 1s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* Loading skeleton */
+  .popup-skeleton { position: relative; overflow: hidden; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; }
+  .popup-skeleton::after {
+    content: ''; position: absolute; inset: 0;
+    background: linear-gradient(90deg, transparent 0%, rgba(128,128,128,.06) 50%, transparent 100%);
+    animation: shimmer 1.5s infinite;
+  }
+  @keyframes shimmer { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
+  .skel-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 0.45rem; padding: 0.65rem 0.75rem 0; }
+  .skel-stat { height: 3.5rem; }
+  .skel-arrival { height: 3.8rem; margin: 0.55rem 0.75rem 0; }
+  .skel-pods { margin: 0.55rem 0.75rem 0; height: 4rem; }
 </style>
 </head>
 <body>
@@ -87,6 +117,17 @@
 <div id="no-pat" class="setup-prompt" style="display:none">
   <p>No Azure DevOps PAT configured yet.<br>Set up your connection to get started.</p>
   <button class="setup-btn" id="configure-btn">Configure →</button>
+</div>
+
+<div id="popup-skeleton" style="display:none">
+  <div class="skel-stats">
+    <div class="popup-skeleton skel-stat"></div>
+    <div class="popup-skeleton skel-stat"></div>
+    <div class="popup-skeleton skel-stat"></div>
+    <div class="popup-skeleton skel-stat"></div>
+  </div>
+  <div class="popup-skeleton skel-arrival"></div>
+  <div class="popup-skeleton skel-pods"></div>
 </div>
 
 <div id="main" style="display:none">
@@ -117,6 +158,7 @@
     <div class="label">Arrival Rate — All pods this week</div>
     <div class="arrival-row">
       <div class="arrival-big" id="a-last7">—</div>
+      <div class="sparkline" id="a-sparkline"></div>
       <div class="arrival-detail">
         <div id="a-trend">vs prev week: —</div>
         <div id="a-last30">Last 30d: —</div>
