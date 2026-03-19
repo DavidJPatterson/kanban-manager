@@ -272,27 +272,27 @@ async function buildOverviewPanel(cachedData) {
     return `<div class="chart-title"><span>${escHtml(title)}</span><span class="chart-info">?<span class="chart-tip">${explanation}</span></span></div>`;
   }
 
-  // ── Optional: Throughput by Person (aggregate + per-pod) ──
+  // ── Optional: Throughput per Person (aggregate + per-pod) ──
   if (oc.throughputByPerson) {
-    const div = document.createElement('div');
-    div.className = 'metric-chart';
-    div.innerHTML = tip('Throughput per Person', 'Stacked bars showing each person\'s weekly throughput (closed + resolved, excluding Spikes). Helps identify load imbalances and single points of failure.') + '<div class="tp-person-chart"></div>';
-    chartsGrid.appendChild(div);
-    const tpByPerson = calcWeeklyThroughputByPerson(allItems, 8);
-    renderStackedBarChart(div.querySelector('.tp-person-chart'), tpByPerson.labels, tpByPerson.people, { width: 500, height: 150 });
+    const div = document.createElement('div')
+    div.className = 'metric-chart'
+    div.innerHTML = tip('Throughput per Person', 'Weekly items completed divided by the number of people who closed items that week. Shows average output per contributor.') + '<div class="tp-person-chart"></div>'
+    chartsGrid.appendChild(div)
+    const tpPerPerson = calcWeeklyThroughputPerPerson(allItems, 8)
+    renderThroughputPerPersonChart(div.querySelector('.tp-person-chart'), tpPerPerson, { width: 500, height: 150 })
 
-    // Per-pod throughput by person
-    const podBlocks = perPodContainer.querySelectorAll('[data-pod-id]');
+    // Per-pod throughput per person
+    const podBlocks = perPodContainer.querySelectorAll('[data-pod-id]')
     for (const block of podBlocks) {
-      const podId = block.dataset.podId;
-      const pod = pods.find(p => p.id === podId);
-      if (!pod) continue;
-      const podTpByPerson = calcWeeklyThroughputByPerson(pod.items || [], 8);
-      if (!podTpByPerson.people.length) continue;
-      const tpDiv = document.createElement('div');
-      tpDiv.innerHTML = '<div class="chart-subtitle">Throughput per Person</div><div class="pod-tp-person"></div>';
-      block.querySelector('.pod-charts-grid').appendChild(tpDiv);
-      renderStackedBarChart(tpDiv.querySelector('.pod-tp-person'), podTpByPerson.labels, podTpByPerson.people, { width: 400, height: 140 });
+      const podId = block.dataset.podId
+      const pod = pods.find(p => p.id === podId)
+      if (!pod) continue
+      const podTpPerPerson = calcWeeklyThroughputPerPerson(pod.items || [], 8)
+      if (podTpPerPerson.every(d => d.perPerson === 0)) continue
+      const tpDiv = document.createElement('div')
+      tpDiv.innerHTML = '<div class="chart-subtitle">Throughput per Person</div><div class="pod-tp-person"></div>'
+      block.querySelector('.pod-charts-grid').appendChild(tpDiv)
+      renderThroughputPerPersonChart(tpDiv.querySelector('.pod-tp-person'), podTpPerPerson, { width: 400, height: 140, color: pod.color })
     }
   }
 
