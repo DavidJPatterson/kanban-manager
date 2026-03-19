@@ -191,8 +191,9 @@ async function buildOverviewPanel(cachedData) {
     <div class="kpi kpi-center"><span class="trend-badge ${tpDiff>0?'trend-up-good':tpDiff<0?'trend-up-bad':'trend-neutral'}">${tpDiff>0?`↑${tpDiff}`:tpDiff<0?`↓${Math.abs(tpDiff)}`:'→'} vs prev</span></div>
   `;
   renderBarChart(panel.querySelector('#ov-throughput-chart'), [
-    { label: 'Items resolved', color: '#10b981', data: throughput }
-  ], { width: 500, height: 140, avgLine: { value: +tpAvg, label: 'avg', color: '#10b981' } });
+    { label: 'Closed', color: '#10b981', data: throughput.map(w => ({ label: w.label, count: w.closed })) },
+    { label: 'Resolved', color: '#60a5fa', data: throughput.map(w => ({ label: w.label, count: w.resolved })) }
+  ], { width: 500, height: 140, stacked: true, avgLine: { value: +tpAvg, label: 'avg', color: '#10b981' } });
 
   // Per-pod flow charts — one arrival + throughput chart per pod
   const perPodSection = document.createElement('div');
@@ -256,8 +257,9 @@ async function buildOverviewPanel(cachedData) {
       { label: 'Arrived', color, data: pArrival }
     ], { width: 420, height: 110, avgLine: { value: +pStats.avgPerWeek, label: 'avg', color } });
     renderBarChart(block.querySelector(`.pod-tp-chart-${pod.id}`), [
-      { label: 'Resolved', color: '#10b981', data: pThroughput }
-    ], { width: 420, height: 110, avgLine: { value: pTpAvg, label: 'avg', color: '#10b981' } });
+      { label: 'Closed', color: '#10b981', data: pThroughput.map(w => ({ label: w.label, count: w.closed })) },
+      { label: 'Resolved', color: '#60a5fa', data: pThroughput.map(w => ({ label: w.label, count: w.resolved })) }
+    ], { width: 420, height: 110, stacked: true, avgLine: { value: pTpAvg, label: 'avg', color: '#10b981' } });
   });
 
   // ── Optional charts ──
@@ -1025,7 +1027,10 @@ function buildPodPanel(pod) {
 
   // Render charts
   renderBarChart(panel.querySelector('.pod-arrival-chart'), [{ label:'Items arrived', color:'#6366f1', data:arrival }], { width:500, height:120, avgLine: { value: +stats.avgPerWeek, label: 'avg', color: '#60a5fa' } });
-  renderBarChart(panel.querySelector('.pod-throughput-chart'), [{ label:'Items resolved', color:'#10b981', data:throughput }], { width:500, height:120, avgLine: { value: +tpAvgPod, label: 'avg', color: '#10b981' } });
+  renderBarChart(panel.querySelector('.pod-throughput-chart'), [
+    { label: 'Closed', color: '#10b981', data: throughput.map(w => ({ label: w.label, count: w.closed })) },
+    { label: 'Resolved', color: '#60a5fa', data: throughput.map(w => ({ label: w.label, count: w.resolved })) }
+  ], { width: 500, height: 120, stacked: true, avgLine: { value: +tpAvgPod, label: 'avg', color: '#10b981' } });
 }
 
 // ─── Main render ──────────────────────────────────────────────────────────────

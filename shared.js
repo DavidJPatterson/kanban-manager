@@ -448,14 +448,19 @@ function calcWeeklyArrival(items, weeksBack = 8) {
 }
 
 function calcWeeklyThroughput(items, weeksBack = 8) {
-  const done = items.filter(i => (i.closed || i.resolved) && i.type !== 'Spike');
-  return weekBuckets(weeksBack).map(({ start, end, label }) => ({
-    label,
-    count: done.filter(i => {
-      const d = new Date(i.closed || i.resolved);
-      return d >= start && d <= end;
-    }).length
-  }));
+  const done = items.filter(i => (i.closed || i.resolved) && i.type !== 'Spike')
+  return weekBuckets(weeksBack).map(({ start, end, label }) => {
+    let resolved = 0
+    let closed = 0
+    for (const i of done) {
+      const d = new Date(i.closed || i.resolved)
+      if (d >= start && d <= end) {
+        if (i.closed) closed++
+        else resolved++
+      }
+    }
+    return { label, count: resolved + closed, resolved, closed }
+  })
 }
 
 function calcWeeklyThroughputByPerson(items, weeksBack = 8) {
@@ -920,13 +925,17 @@ function renderBarChart(container, datasets, opts = {}) {
   const PAD = { top: 16, right: opts.avgLine ? 40 : 10, bottom: 46, left: 28 };
   const chartW = W - PAD.left - PAD.right;
   const chartH = H - PAD.top - PAD.bottom;
+  const stacked = opts.stacked && datasets.length > 1;
 
-  const maxVal = Math.max(1, ...datasets.flatMap(ds => ds.data.map(d => d.count)));
+  // For stacked bars, max is the sum of all datasets per bucket
+  const maxVal = stacked
+    ? Math.max(1, ...datasets[0].data.map((_, i) => datasets.reduce((s, ds) => s + ds.data[i].count, 0)))
+    : Math.max(1, ...datasets.flatMap(ds => ds.data.map(d => d.count)));
   const labels = datasets[0].data.map(d => d.label);
   const n = labels.length;
   const ds = datasets.length;
   const groupW = chartW / n;
-  const barW = Math.max(4, (groupW - 8) / ds);
+  const barW = stacked ? Math.max(4, groupW - 8) : Math.max(4, (groupW - 8) / ds);
 
   let svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" style="width:100%;height:auto">`;
 
@@ -939,17 +948,38 @@ function renderBarChart(container, datasets, opts = {}) {
   }
 
   // Bars + labels
-  datasets.forEach((ds_item, di) => {
-    ds_item.data.forEach((d, i) => {
-      const barH = (d.count / maxVal) * chartH;
-      const x = PAD.left + i * groupW + di * barW + 4;
-      const y = PAD.top + chartH - barH;
-      svg += `<rect x="${x}" y="${y}" width="${barW}" height="${barH}" rx="3" fill="${ds_item.color}" opacity="0.85"><title>${d.label}: ${d.count}</title></rect>`;
-      if (d.count > 0) {
-        svg += `<text x="${x + barW / 2}" y="${y - 3}" text-anchor="middle" font-size="9" fill="${ds_item.color}">${d.count}</text>`;
+  if (stacked) {
+    for (let i = 0; i < n; i++) {
+      const x = PAD.left + i * groupW + 4
+      let cumY = PAD.top + chartH
+      const total = datasets.reduce((s, ds_item) => s + ds_item.data[i].count, 0)
+      // Draw from bottom up
+      datasets.forEach(ds_item => {
+        const val = ds_item.data[i].count
+        if (val <= 0) return
+        const barH = (val / maxVal) * chartH
+        cumY -= barH
+        svg += `<rect x="${x}" y="${cumY}" width="${barW}" height="${barH}" rx="2" fill="${ds_item.color}" opacity="0.85"><title>${ds_item.data[i].label}: ${ds_item.label} ${val}</title></rect>`
+      })
+      if (total > 0) {
+        const totalH = (total / maxVal) * chartH
+        const topY = PAD.top + chartH - totalH
+        svg += `<text x="${x + barW / 2}" y="${topY - 3}" text-anchor="middle" font-size="9" fill="#94a3b8">${total}</text>`
       }
+    }
+  } else {
+    datasets.forEach((ds_item, di) => {
+      ds_item.data.forEach((d, i) => {
+        const barH = (d.count / maxVal) * chartH;
+        const x = PAD.left + i * groupW + di * barW + 4;
+        const y = PAD.top + chartH - barH;
+        svg += `<rect x="${x}" y="${y}" width="${barW}" height="${barH}" rx="3" fill="${ds_item.color}" opacity="0.85"><title>${d.label}: ${d.count}</title></rect>`;
+        if (d.count > 0) {
+          svg += `<text x="${x + barW / 2}" y="${y - 3}" text-anchor="middle" font-size="9" fill="${ds_item.color}">${d.count}</text>`;
+        }
+      });
     });
-  });
+  }
 
   // X-axis labels — one per week, rotated 45° to fit 8 labels without crowding
   labels.forEach((label, i) => {
