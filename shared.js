@@ -463,26 +463,23 @@ function calcWeeklyThroughput(items, weeksBack = 8) {
   })
 }
 
-function calcWeeklyThroughputByPerson(items, weeksBack = 8) {
-  const done = items.filter(i => (i.closed || i.resolved) && i.assignee && i.type !== 'Spike');
-  const buckets = weekBuckets(weeksBack);
-  const people = {};
-  for (const item of done) {
-    const d = new Date(item.closed || item.resolved);
-    for (const bucket of buckets) {
-      if (d >= bucket.start && d <= bucket.end) {
-        if (!people[item.assignee]) people[item.assignee] = new Array(buckets.length).fill(0);
-        people[item.assignee][buckets.indexOf(bucket)]++;
-        break;
+function calcWeeklyThroughputPerPerson(items, weeksBack = 8) {
+  const done = items.filter(i => (i.closed || i.resolved) && i.assignee && i.type !== 'Spike')
+  const buckets = weekBuckets(weeksBack)
+  return buckets.map(({ start, end, label }) => {
+    let count = 0
+    const people = new Set()
+    for (const item of done) {
+      const d = new Date(item.closed || item.resolved)
+      if (d >= start && d <= end) {
+        count++
+        people.add(item.assignee)
       }
     }
-  }
-  // Sort people by total throughput descending
-  const sorted = Object.entries(people).sort((a, b) => b[1].reduce((s, v) => s + v, 0) - a[1].reduce((s, v) => s + v, 0));
-  return {
-    labels: buckets.map(b => b.label),
-    people: sorted.map(([name, counts]) => ({ name, counts }))
-  };
+    const numPeople = people.size || 0
+    const perPerson = numPeople > 0 ? +(count / numPeople).toFixed(1) : 0
+    return { label, count, numPeople, perPerson }
+  })
 }
 
 function calcClosedByPerson(items, weeksBack = 8) {
@@ -1160,74 +1157,63 @@ function renderLineChart(container, datasets, opts = {}) {
   container.innerHTML = svg;
 }
 
-// ─── SVG stacked bar chart (throughput by person) ────────────────────────────
+// ─── SVG bar chart (throughput per person) ───────────────────────────────────
 
-function renderStackedBarChart(container, labels, people, opts = {}) {
-  const W = opts.width || 600;
-  const H = opts.height || 200;
-  const PAD = { top: 16, right: 10, bottom: 46, left: 28 };
-  const chartW = W - PAD.left - PAD.right;
-  const chartH = H - PAD.top - PAD.bottom;
+function renderThroughputPerPersonChart(container, data, opts = {}) {
+  const W = opts.width || 600
+  const H = opts.height || 200
+  const PAD = { top: 16, right: 28, bottom: 46, left: 28 }
+  const chartW = W - PAD.left - PAD.right
+  const chartH = H - PAD.top - PAD.bottom
 
-  if (!people.length) {
-    container.innerHTML = '<div style="font-size:.75rem;color:var(--muted, #64748b);padding:.5rem">No per-person throughput data</div>';
-    return;
+  if (!data.length || data.every(d => d.perPerson === 0)) {
+    container.innerHTML = '<div style="font-size:.75rem;color:var(--muted, #64748b);padding:.5rem">No throughput data</div>'
+    return
   }
 
-  const n = labels.length;
-  const stackedTotals = new Array(n).fill(0);
-  for (const p of people) {
-    for (let i = 0; i < n; i++) stackedTotals[i] += p.counts[i];
-  }
-  const maxVal = Math.max(1, ...stackedTotals);
-  const groupW = chartW / n;
-  const barW = Math.max(12, groupW - 8);
+  const n = data.length
+  const maxVal = Math.max(1, ...data.map(d => d.perPerson))
+  const groupW = chartW / n
+  const barW = Math.max(12, groupW - 8)
+  const barColor = opts.color || 'var(--accent, #6366f1)'
 
-  let svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" style="width:100%;height:auto">`;
+  let svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" style="width:100%;height:auto">`
 
   for (let i = 0; i <= 4; i++) {
-    const y = PAD.top + (chartH * (1 - i / 4));
-    const val = Math.round((maxVal * i) / 4);
-    svg += `<line x1="${PAD.left}" y1="${y}" x2="${PAD.left + chartW}" y2="${y}" stroke="#334155" stroke-width="0.5" stroke-dasharray="4,4" opacity="0.6"/>`;
-    svg += `<text x="${PAD.left - 4}" y="${y + 4}" text-anchor="end" font-size="9" fill="#64748b">${val}</text>`;
+    const y = PAD.top + (chartH * (1 - i / 4))
+    const val = +((maxVal * i) / 4).toFixed(1)
+    svg += `<line x1="${PAD.left}" y1="${y}" x2="${PAD.left + chartW}" y2="${y}" stroke="#334155" stroke-width="0.5" stroke-dasharray="4,4" opacity="0.6"/>`
+    svg += `<text x="${PAD.left - 4}" y="${y + 4}" text-anchor="end" font-size="9" fill="#64748b">${val}</text>`
   }
 
   for (let i = 0; i < n; i++) {
-    let yOffset = 0;
-    const x = PAD.left + i * groupW + (groupW - barW) / 2;
-    for (let pi = 0; pi < people.length; pi++) {
-      const count = people[pi].counts[i];
-      if (count === 0) continue;
-      const barH = (count / maxVal) * chartH;
-      const y = PAD.top + chartH - yOffset - barH;
-      const color = assigneeColor(people[pi].name);
-      svg += `<rect x="${x}" y="${y}" width="${barW}" height="${barH}" rx="2" fill="${color}" opacity="0.85"><title>${people[pi].name.split(' ')[0]}: ${count}</title></rect>`;
-      yOffset += barH;
-    }
-    if (stackedTotals[i] > 0) {
-      svg += `<text x="${x + barW / 2}" y="${PAD.top + chartH - yOffset - 3}" text-anchor="middle" font-size="9" fill="#64748b">${stackedTotals[i]}</text>`;
+    const d = data[i]
+    const x = PAD.left + i * groupW + (groupW - barW) / 2
+    const barH = (d.perPerson / maxVal) * chartH
+    const y = PAD.top + chartH - barH
+    svg += `<rect x="${x}" y="${y}" width="${barW}" height="${barH}" rx="2" fill="${barColor}" opacity="0.85"><title>${d.count} items / ${d.numPeople} ${d.numPeople === 1 ? 'person' : 'people'} = ${d.perPerson}/person</title></rect>`
+    if (d.perPerson > 0) {
+      svg += `<text x="${x + barW / 2}" y="${y - 3}" text-anchor="middle" font-size="9" fill="#64748b">${d.perPerson}</text>`
     }
   }
 
-  labels.forEach((label, i) => {
-    const cx = PAD.left + i * groupW + groupW / 2;
-    const cy = PAD.top + chartH + 8;
-    svg += `<text transform="rotate(-45,${cx},${cy})" x="${cx}" y="${cy}" text-anchor="end" font-size="8" fill="#64748b">${label}</text>`;
-  });
+  // Average line
+  const nonZero = data.filter(d => d.perPerson > 0)
+  if (nonZero.length) {
+    const avg = +(nonZero.reduce((s, d) => s + d.perPerson, 0) / nonZero.length).toFixed(1)
+    const avgY = PAD.top + chartH - (avg / maxVal) * chartH
+    svg += `<line x1="${PAD.left}" y1="${avgY}" x2="${PAD.left + chartW}" y2="${avgY}" stroke="#f59e0b" stroke-width="1.5" stroke-dasharray="6,3" opacity="0.9"><title>Avg: ${avg}/person</title></line>`
+    svg += `<text x="${PAD.left + chartW + 2}" y="${avgY + 3}" font-size="8" fill="#f59e0b">${avg}</text>`
+  }
 
-  const legendPeople = people.slice(0, 8);
-  const legendY = H - 8;
-  let lx = PAD.left;
-  legendPeople.forEach(p => {
-    const color = assigneeColor(p.name);
-    const short = p.name.split(' ')[0];
-    svg += `<rect x="${lx}" y="${legendY - 8}" width="8" height="8" rx="2" fill="${color}"/>`;
-    svg += `<text x="${lx + 11}" y="${legendY}" font-size="9" fill="#64748b">${short}</text>`;
-    lx += short.length * 6 + 20;
-  });
+  data.forEach((d, i) => {
+    const cx = PAD.left + i * groupW + groupW / 2
+    const cy = PAD.top + chartH + 8
+    svg += `<text transform="rotate(-45,${cx},${cy})" x="${cx}" y="${cy}" text-anchor="end" font-size="8" fill="#64748b">${d.label}</text>`
+  })
 
-  svg += '</svg>';
-  container.innerHTML = svg;
+  svg += '</svg>'
+  container.innerHTML = svg
 }
 
 // ─── SVG horizontal bar chart (closed by person with history) ────────────────
