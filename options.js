@@ -58,8 +58,8 @@ document.addEventListener('DOMContentLoaded', () => {
     if (s.areaPath && (!s.pods || s.pods.length === 0)) {
       s.pods = [{ id: 'pod-migrated', name: 'Pod 1', areaPath: s.areaPath }];
     }
-    $('org').value = s.org || 'amcsgroup';
-    $('project').value = s.project || 'Platform';
+    $('org').value = s.org || '';
+    $('project').value = s.project || '';
     $('pat').value = s.pat || '';
     $('refreshInterval').value = String(s.refreshInterval || 15);
     renderPodList(s.pods || []);
@@ -174,18 +174,16 @@ async function testConnection() {
 
   resultEl.textContent = `Testing ${pods.length} pod${pods.length !== 1 ? 's' : ''}…`;
 
+  const tempSettings = { org, project, pat };
   const lines = [];
   for (const pod of pods) {
     try {
-      const url = `https://dev.azure.com/${org}/${project}/_apis/wit/wiql?api-version=7.1`;
-      const resp = await fetch(url, {
-        method: 'POST',
-        headers: { 'Authorization': `Basic ${btoa(':' + pat)}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: `SELECT [System.Id] FROM WorkItems WHERE [System.AreaPath] UNDER '${pod.areaPath}' AND [System.State] NOT IN ('Closed','Removed')` })
-      });
-      if (!resp.ok) { lines.push(`❌ ${pod.name}: HTTP ${resp.status}`); continue; }
-      const data = await resp.json();
-      lines.push(`✅ ${pod.name}: ${(data.workItems || []).length} active items`);
+      const ap = pod.areaPath.replace(/'/g, "''");
+      const ids = await runWiql(
+        `SELECT [System.Id] FROM WorkItems WHERE [System.AreaPath] UNDER '${ap}' AND [System.State] NOT IN ('Closed','Removed')`,
+        tempSettings
+      );
+      lines.push(`✅ ${pod.name}: ${ids.length} active items`);
     } catch (err) {
       lines.push(`❌ ${pod.name}: ${err.message}`);
     }

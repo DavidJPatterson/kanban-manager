@@ -1,8 +1,8 @@
 // shared.js — ADO API + data processing shared across popup, board, and background
 
 const DEFAULT_SETTINGS = {
-  org: 'amcsgroup',
-  project: 'Platform',
+  org: '',
+  project: '',
   refreshInterval: 15,
   pat: '',
   pods: [],
@@ -270,7 +270,7 @@ async function enrichWithArrivedAt(items, podAreaPath, settings) {
 // Resolve a pod's area path to its ADO team
 async function fetchTeamForPod(pod, settings) {
   const teamsResp = await adoFetch(
-    `https://dev.azure.com/${encodeURIComponent(settings.org)}/_apis/projects/${encodeURIComponent(settings.project)}/teams?api-version=7.1`,
+    `https://dev.azure.com/${encodeURIComponent(settings.org)}/_apis/projects/${encodeURIComponent(settings.project)}/teams?$top=500&api-version=7.1`,
     settings
   )
   for (const team of teamsResp.value || []) {
@@ -322,7 +322,7 @@ async function fetchWipLimits(pod, settings) {
 
 // Fetch data for a single pod area path
 async function fetchPodData(pod, settings) {
-  const ap = pod.areaPath;
+  const ap = pod.areaPath.replace(/'/g, "''");
   const ninetyDaysAgo = new Date();
   ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
   const cutoff = ninetyDaysAgo.toISOString().split('T')[0];
@@ -349,7 +349,7 @@ async function fetchPodData(pod, settings) {
 
   const allIds = [...new Set([...activeIds, ...closedIds])];
   const rawItems = await getWorkItemsBatch(allIds, settings);
-  const items = rawItems.map(mapItem);
+  const items = rawItems.map(raw => mapItem(raw, settings));
   return await enrichWithArrivedAt(items, pod.areaPath, settings);
 }
 
@@ -377,7 +377,7 @@ function getAllItems(cachedData) {
   return Object.values(cachedData.pods).flatMap(p => p.items || []);
 }
 
-function mapItem(raw) {
+function mapItem(raw, settings) {
   const f = raw.fields;
   const at = f['System.AssignedTo'];
   const assignee = at ? (typeof at === 'object' ? at.displayName : at) : null;
@@ -407,7 +407,7 @@ function mapItem(raw) {
     iterationPath: f['System.IterationPath'] || '',
     stackRank: f['Microsoft.VSTS.Common.StackRank'] || 0,
     targetPI: f['Custom.TargetPI'] || '',
-    url: `https://dev.azure.com/${DEFAULT_SETTINGS.org}/${DEFAULT_SETTINGS.project}/_workitems/edit/${f['System.Id']}`
+    url: `https://dev.azure.com/${settings.org}/${settings.project}/_workitems/edit/${f['System.Id']}`
   };
 }
 
@@ -482,14 +482,12 @@ function calcWeeklyThroughputPerPerson(items, weeksBack = 8) {
   })
 }
 
-function calcClosedByPerson(items, weeksBack = 8) {
+function calcCompletedByPerson(items, dateField, weeksBack = 8) {
   const buckets = weekBuckets(weeksBack);
-  const closed = items.filter(i => i.closed && i.assignee);
-
-  // Count per person per week
+  const completed = items.filter(i => i[dateField] && i.assignee);
   const byPerson = {};
-  for (const item of closed) {
-    const d = new Date(item.closed);
+  for (const item of completed) {
+    const d = new Date(item[dateField]);
     for (let wi = 0; wi < buckets.length; wi++) {
       if (d >= buckets[wi].start && d <= buckets[wi].end) {
         if (!byPerson[item.assignee]) byPerson[item.assignee] = new Array(buckets.length).fill(0);
@@ -498,7 +496,6 @@ function calcClosedByPerson(items, weeksBack = 8) {
       }
     }
   }
-
   return Object.entries(byPerson)
     .map(([name, weekly]) => {
       const thisWeek = weekly[weekly.length - 1];
@@ -509,30 +506,12 @@ function calcClosedByPerson(items, weeksBack = 8) {
     .sort((a, b) => b.thisWeek - a.thisWeek || b.avg - a.avg);
 }
 
+function calcClosedByPerson(items, weeksBack = 8) {
+  return calcCompletedByPerson(items, 'closed', weeksBack);
+}
+
 function calcResolvedByPerson(items, weeksBack = 8) {
-  const buckets = weekBuckets(weeksBack);
-  const resolved = items.filter(i => i.resolved && i.assignee);
-
-  const byPerson = {};
-  for (const item of resolved) {
-    const d = new Date(item.resolved);
-    for (let wi = 0; wi < buckets.length; wi++) {
-      if (d >= buckets[wi].start && d <= buckets[wi].end) {
-        if (!byPerson[item.assignee]) byPerson[item.assignee] = new Array(buckets.length).fill(0);
-        byPerson[item.assignee][wi]++;
-        break;
-      }
-    }
-  }
-
-  return Object.entries(byPerson)
-    .map(([name, weekly]) => {
-      const thisWeek = weekly[weekly.length - 1];
-      const total = weekly.reduce((s, v) => s + v, 0);
-      const avg = +(total / weekly.length).toFixed(1);
-      return { name, thisWeek, avg, total, weekly };
-    })
-    .sort((a, b) => b.thisWeek - a.thisWeek || b.avg - a.avg);
+  return calcCompletedByPerson(items, 'resolved', weeksBack);
 }
 
 // ─── WIP Trend: count of active items at end of each week ────────────────────
@@ -728,7 +707,7 @@ function teamLoad(items) {
 }
 
 function ageDays(item) {
-  return Math.floor((Date.now() - new Date(item.created).getTime()) / 86400000);
+  return Math.floor((Date.now() - new Date(item.arrivedAt || item.created).getTime()) / 86400000);
 }
 
 function ageClass(days) {
@@ -803,6 +782,7 @@ function calcNewStackRank(aboveRank, belowRank) {
 // ─── Started-At Cache (for cycle time) ────────────────────────────────────────
 
 const STARTED_CACHE_VERSION = 1;
+const STARTED_CACHE_NONE = '__none__';
 
 function getStartedAtCache() {
   return new Promise(resolve =>
@@ -821,18 +801,21 @@ async function getItemStartedAt(itemId, settings) {
   const url = `https://dev.azure.com/${settings.org}/${settings.project}/_apis/wit/workitems/${itemId}/updates?api-version=7.1`;
   try {
     const data = await adoFetch(url, settings);
-    for (const update of (data.value || [])) {
+    // Iterate in reverse to find the most recent activation — items that go
+    // In Progress → Ready → In Progress should use the last start, not the first.
+    let lastActivation = null;
+    for (const update of [...(data.value || [])].reverse()) {
       const boardChange = update.fields?.['System.BoardColumn'];
       if (boardChange?.newValue) {
         const newCol = boardChange.newValue.toLowerCase();
         if (newCol === 'in progress' || newCol === 'active') {
           const changeDate = update.fields?.['System.ChangedDate']?.newValue
             || (update.revisedDate && !update.revisedDate.startsWith('0001') && !update.revisedDate.startsWith('9999') ? update.revisedDate : null);
-          if (changeDate) return changeDate;
+          if (changeDate) { lastActivation = changeDate; break; }
         }
       }
     }
-    return null;
+    return lastActivation;
   } catch {
     return null;
   }
@@ -855,7 +838,7 @@ async function enrichWithStartedAt(items, settings) {
           if (result !== null) {
             newEntries[String(item.id)] = result;
           } else {
-            newEntries[String(item.id)] = '__none__';
+            newEntries[String(item.id)] = STARTED_CACHE_NONE;
           }
         }
       })
@@ -870,7 +853,7 @@ async function enrichWithStartedAt(items, settings) {
 
   return items.map(item => {
     const startedAt = cache[String(item.id)];
-    return { ...item, startedAt: startedAt && startedAt !== '__none__' ? startedAt : null };
+    return { ...item, startedAt: startedAt && startedAt !== STARTED_CACHE_NONE ? startedAt : null };
   });
 }
 
