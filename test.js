@@ -71,12 +71,12 @@ test('buckets are ordered oldest to newest', () => {
   assert(b[2].start < b[3].start, 'Last bucket should be newest')
 })
 
-test('each bucket spans exactly 7 days', () => {
+test('each bucket spans Monday to Sunday', () => {
   const b = weekBuckets(4)
   for (const bucket of b) {
-    const diff = bucket.end - bucket.start
-    const days = diff / 86400000
-    assertClose(days, 7, 0.01, `Bucket spans ${days} days, expected ~7`)
+    assertEqual(bucket.start.getDay(), 1, 'Bucket should start on Monday')
+    assertEqual(bucket.end.getDay(), 0, 'Bucket should end on Sunday')
+    assertEqual(bucket.end.getHours(), 23, 'Bucket end should be 23:59:59')
   }
 })
 
