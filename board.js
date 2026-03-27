@@ -882,7 +882,7 @@ function buildPodPanel(pod) {
     updateColCounts();
     // Persist filter state for this pod
     _boardFilters[pod.id] = { filter: v, search: query };
-    chrome.storage.local.set({ boardFilters: _boardFilters });
+    chrome.storage.local.set({ [STORAGE_KEYS.boardFilters]: _boardFilters });
   }
 
   // Wire search input
@@ -1084,8 +1084,8 @@ chrome.runtime.onMessage.addListener(msg => {
 
 (async () => {
   // Load persisted filter state before first render so panels restore correctly
-  const stored = await new Promise(r => chrome.storage.local.get('boardFilters', r));
-  _boardFilters = stored.boardFilters || {};
+  const stored = await new Promise(r => chrome.storage.local.get(STORAGE_KEYS.boardFilters, r));
+  _boardFilters = stored[STORAGE_KEYS.boardFilters] || {};
 
   const settings = await getSettings();
   $('refresh-interval').textContent = settings.refreshInterval || 15;

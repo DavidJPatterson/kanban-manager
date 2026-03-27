@@ -24,11 +24,22 @@ const DEFAULT_SETTINGS = {
   }
 };
 
+const STORAGE_KEYS = {
+  settings: 'settings',
+  cachedData: 'cachedData',
+  arrivedAtCache: 'arrivedAtCache',
+  arrivedAtCacheVersion: 'arrivedAtCacheVersion',
+  startedAtCache: 'startedAtCache',
+  startedAtCacheVersion: 'startedAtCacheVersion',
+  boardFilters: 'boardFilters',
+  theme: 'theme',
+}
+
 // ─── Storage helpers ───────────────────────────────────────────────────────────
 
 function getSettings() {
   return new Promise(resolve =>
-    chrome.storage.local.get('settings', r => {
+    chrome.storage.local.get(STORAGE_KEYS.settings, r => {
       const s = { ...DEFAULT_SETTINGS, ...(r.settings || {}) };
       // Migrate from old single-areaPath format
       if (s.areaPath && (!s.pods || s.pods.length === 0)) {
@@ -46,12 +57,12 @@ function generateId() {
 
 function getCachedData() {
   return new Promise(resolve =>
-    chrome.storage.local.get('cachedData', r => resolve(r.cachedData || null))
+    chrome.storage.local.get(STORAGE_KEYS.cachedData, r => resolve(r.cachedData || null))
   );
 }
 
 function setCachedData(data) {
-  return new Promise(resolve => chrome.storage.local.set({ cachedData: data }, resolve));
+  return new Promise(resolve => chrome.storage.local.set({ [STORAGE_KEYS.cachedData]: data }, resolve));
 }
 
 // Cache version — bump when arrival logic changes to force a re-fetch of all items.
@@ -59,13 +70,13 @@ const ARRIVED_CACHE_VERSION = 3;
 
 function getArrivedAtCache() {
   return new Promise(resolve =>
-    chrome.storage.local.get(['arrivedAtCache', 'arrivedAtCacheVersion'], r => {
-      if (r.arrivedAtCacheVersion !== ARRIVED_CACHE_VERSION) {
+    chrome.storage.local.get([STORAGE_KEYS.arrivedAtCache, STORAGE_KEYS.arrivedAtCacheVersion], r => {
+      if (r[STORAGE_KEYS.arrivedAtCacheVersion] !== ARRIVED_CACHE_VERSION) {
         // Logic changed — wipe stale cache
-        chrome.storage.local.set({ arrivedAtCache: {}, arrivedAtCacheVersion: ARRIVED_CACHE_VERSION });
+        chrome.storage.local.set({ [STORAGE_KEYS.arrivedAtCache]: {}, [STORAGE_KEYS.arrivedAtCacheVersion]: ARRIVED_CACHE_VERSION });
         resolve({});
       } else {
-        resolve(r.arrivedAtCache || {});
+        resolve(r[STORAGE_KEYS.arrivedAtCache] || {});
       }
     })
   );
@@ -74,18 +85,23 @@ function getArrivedAtCache() {
 async function updateArrivedAtCache(entries) {
   const cache = await getArrivedAtCache();
   Object.assign(cache, entries);
-  return new Promise(resolve => chrome.storage.local.set({ arrivedAtCache: cache }, resolve));
+  return new Promise(resolve => chrome.storage.local.set({ [STORAGE_KEYS.arrivedAtCache]: cache }, resolve));
 }
 
 // ─── ADO REST API ──────────────────────────────────────────────────────────────
 
+const FETCH_TIMEOUT_MS = 15000
+
 async function adoFetch(url, settings, options = {}) {
   const MAX_RETRIES = 3;
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
     let resp;
     try {
       resp = await fetch(url, {
         ...options,
+        signal: controller.signal,
         headers: {
           'Authorization': `Basic ${btoa(':' + settings.pat)}`,
           'Content-Type': 'application/json',
@@ -93,16 +109,20 @@ async function adoFetch(url, settings, options = {}) {
         }
       });
     } catch (networkErr) {
-      // Network-level failure (offline, DNS, CORS etc.) — retry with backoff
+      // Network-level failure (offline, DNS, CORS, timeout abort) — retry with backoff
+      clearTimeout(timeoutId)
       if (attempt < MAX_RETRIES) {
         await new Promise(r => setTimeout(r, (2 ** attempt) * 1000));
         continue;
       }
       throw networkErr;
+    } finally {
+      clearTimeout(timeoutId)
     }
     if (!resp.ok) {
       const body = await resp.text().catch(() => '');
       const err = new Error(`ADO ${resp.status}: ${resp.statusText} — ${body.slice(0, 200)}`);
+      err.status = resp.status
       // Retry only on server errors (5xx) or rate limit (429); never on 4xx auth/not-found
       if ((resp.status >= 500 || resp.status === 429) && attempt < MAX_RETRIES) {
         await new Promise(r => setTimeout(r, (2 ** attempt) * 1000));
@@ -244,14 +264,14 @@ async function enrichWithArrivedAt(items, podAreaPath, settings) {
       const freshCache = await getArrivedAtCache();
       for (const key of invalidated) delete freshCache[key];
       Object.assign(freshCache, newEntries);
-      await new Promise(resolve => chrome.storage.local.set({ arrivedAtCache: freshCache }, resolve));
+      await new Promise(resolve => chrome.storage.local.set({ [STORAGE_KEYS.arrivedAtCache]: freshCache }, resolve));
       Object.assign(cache, newEntries);
     }
   } else if (invalidated.length > 0) {
     // No uncached items but we invalidated some — persist the removals
     const freshCache = await getArrivedAtCache();
     for (const key of invalidated) delete freshCache[key];
-    await new Promise(resolve => chrome.storage.local.set({ arrivedAtCache: freshCache }, resolve));
+    await new Promise(resolve => chrome.storage.local.set({ [STORAGE_KEYS.arrivedAtCache]: freshCache }, resolve));
   }
 
   return items.map(item => {
@@ -354,17 +374,24 @@ async function fetchPodData(pod, settings) {
 }
 
 // Fetch all configured pods in parallel
-async function fetchAllPods(settings) {
+// Pass previousData to skip pods that returned 404 last cycle (cleared on settings save)
+async function fetchAllPods(settings, previousData) {
   const pods = settings.pods || [];
   const podResults = {};
+  const prev = previousData?.pods || {}
 
   await Promise.all(pods.map(async pod => {
+    // Skip pods whose area path was not found last time — retried when settings change
+    if (prev[pod.id]?.error404) {
+      podResults[pod.id] = prev[pod.id]
+      return
+    }
     try {
       const items = await fetchPodData(pod, settings);
       const { wipLimits, teamId, boardName } = await fetchWipLimits(pod, settings);
       podResults[pod.id] = { id: pod.id, name: pod.name, areaPath: pod.areaPath, items, wipLimits, teamId, boardName, fetchedAt: new Date().toISOString(), error: null };
     } catch (err) {
-      podResults[pod.id] = { id: pod.id, name: pod.name, areaPath: pod.areaPath, items: [], wipLimits: {}, fetchedAt: new Date().toISOString(), error: err.message };
+      podResults[pod.id] = { id: pod.id, name: pod.name, areaPath: pod.areaPath, items: [], wipLimits: {}, fetchedAt: new Date().toISOString(), error: err.message, error404: err.status === 404 };
     }
   }));
 
@@ -732,22 +759,25 @@ const ASSIGNEE_COLORS = [
   '#6366f1','#f59e0b','#10b981','#8b5cf6','#ef4444',
   '#06b6d4','#f97316','#84cc16','#ec4899','#14b8a6'
 ];
+
+function hashStr(s) {
+  let h = 5381
+  for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) >>> 0
+  return h
+}
+
 const _colorMap = {};
-let _colorIdx = 0;
 function assigneeColor(name) {
   if (!name) return '#475569';
-  if (!_colorMap[name]) {
-    _colorMap[name] = ASSIGNEE_COLORS[_colorIdx++ % ASSIGNEE_COLORS.length];
-  }
+  if (!_colorMap[name]) _colorMap[name] = ASSIGNEE_COLORS[hashStr(name) % ASSIGNEE_COLORS.length]
   return _colorMap[name];
 }
 
-// Consistent colour per pod (stable across renders)
+// Consistent colour per pod (stable across renders via hash)
 const POD_PALETTE = ['#6366f1','#f59e0b','#10b981','#8b5cf6','#ef4444','#06b6d4','#f97316','#84cc16'];
 const _podColorMap = {};
-let _podColorIdx = 0;
 function podColor(podId) {
-  if (!_podColorMap[podId]) _podColorMap[podId] = POD_PALETTE[_podColorIdx++ % POD_PALETTE.length];
+  if (!_podColorMap[podId]) _podColorMap[podId] = POD_PALETTE[hashStr(podId) % POD_PALETTE.length]
   return _podColorMap[podId];
 }
 
@@ -786,12 +816,12 @@ const STARTED_CACHE_NONE = '__none__';
 
 function getStartedAtCache() {
   return new Promise(resolve =>
-    chrome.storage.local.get(['startedAtCache', 'startedAtCacheVersion'], r => {
-      if (r.startedAtCacheVersion !== STARTED_CACHE_VERSION) {
-        chrome.storage.local.set({ startedAtCache: {}, startedAtCacheVersion: STARTED_CACHE_VERSION });
+    chrome.storage.local.get([STORAGE_KEYS.startedAtCache, STORAGE_KEYS.startedAtCacheVersion], r => {
+      if (r[STORAGE_KEYS.startedAtCacheVersion] !== STARTED_CACHE_VERSION) {
+        chrome.storage.local.set({ [STORAGE_KEYS.startedAtCache]: {}, [STORAGE_KEYS.startedAtCacheVersion]: STARTED_CACHE_VERSION });
         resolve({});
       } else {
-        resolve(r.startedAtCache || {});
+        resolve(r[STORAGE_KEYS.startedAtCache] || {});
       }
     })
   );
@@ -846,7 +876,7 @@ async function enrichWithStartedAt(items, settings) {
     if (Object.keys(newEntries).length > 0) {
       const freshCache = await getStartedAtCache();
       Object.assign(freshCache, newEntries);
-      await new Promise(resolve => chrome.storage.local.set({ startedAtCache: freshCache }, resolve));
+      await new Promise(resolve => chrome.storage.local.set({ [STORAGE_KEYS.startedAtCache]: freshCache }, resolve));
       Object.assign(cache, newEntries);
     }
   }
@@ -897,6 +927,12 @@ function calcBurndown(items, targetPI) {
   return data;
 }
 
+// ─── SVG text escaping ────────────────────────────────────────────────────────
+
+function escSvg(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')
+}
+
 // ─── Simple SVG bar chart ──────────────────────────────────────────────────────
 
 function renderBarChart(container, datasets, opts = {}) {
@@ -939,7 +975,7 @@ function renderBarChart(container, datasets, opts = {}) {
         if (val <= 0) return
         const barH = (val / maxVal) * chartH
         cumY -= barH
-        svg += `<rect x="${x}" y="${cumY}" width="${barW}" height="${barH}" rx="2" fill="${ds_item.color}" opacity="0.85"><title>${ds_item.data[i].label}: ${ds_item.label} ${val}</title></rect>`
+        svg += `<rect x="${x}" y="${cumY}" width="${barW}" height="${barH}" rx="2" fill="${ds_item.color}" opacity="0.85"><title>${escSvg(ds_item.data[i].label)}: ${escSvg(ds_item.label)} ${val}</title></rect>`
       })
       if (total > 0) {
         const totalH = (total / maxVal) * chartH
@@ -953,7 +989,7 @@ function renderBarChart(container, datasets, opts = {}) {
         const barH = (d.count / maxVal) * chartH;
         const x = PAD.left + i * groupW + di * barW + 4;
         const y = PAD.top + chartH - barH;
-        svg += `<rect x="${x}" y="${y}" width="${barW}" height="${barH}" rx="3" fill="${ds_item.color}" opacity="0.85"><title>${d.label}: ${d.count}</title></rect>`;
+        svg += `<rect x="${x}" y="${y}" width="${barW}" height="${barH}" rx="3" fill="${ds_item.color}" opacity="0.85"><title>${escSvg(d.label)}: ${d.count}</title></rect>`;
         if (d.count > 0) {
           svg += `<text x="${x + barW / 2}" y="${y - 3}" text-anchor="middle" font-size="9" fill="${ds_item.color}">${d.count}</text>`;
         }
@@ -965,7 +1001,7 @@ function renderBarChart(container, datasets, opts = {}) {
   labels.forEach((label, i) => {
     const cx = PAD.left + i * groupW + groupW / 2;
     const cy = PAD.top + chartH + 8;
-    svg += `<text transform="rotate(-45,${cx},${cy})" x="${cx}" y="${cy}" text-anchor="end" font-size="8" fill="#64748b">${label}</text>`;
+    svg += `<text transform="rotate(-45,${cx},${cy})" x="${cx}" y="${cy}" text-anchor="end" font-size="8" fill="#64748b">${escSvg(label)}</text>`;
   });
 
   // Average line (optional — pass opts.avgLine = { value, label, color })
@@ -973,7 +1009,7 @@ function renderBarChart(container, datasets, opts = {}) {
     const avgY = PAD.top + chartH * (1 - opts.avgLine.value / maxVal)
     const col = opts.avgLine.color || '#64748b'
     svg += `<line x1="${PAD.left}" y1="${avgY}" x2="${PAD.left + chartW}" y2="${avgY}" stroke="${col}" stroke-width="1.5" stroke-dasharray="6,3" opacity="0.8"/>`
-    svg += `<text x="${PAD.left + chartW + 3}" y="${avgY + 3}" font-size="8" fill="${col}">${opts.avgLine.label || 'avg'} ${opts.avgLine.value}</text>`
+    svg += `<text x="${PAD.left + chartW + 3}" y="${avgY + 3}" font-size="8" fill="${col}">${escSvg(opts.avgLine.label || 'avg')} ${opts.avgLine.value}</text>`
   }
 
   // Legend
@@ -981,7 +1017,7 @@ function renderBarChart(container, datasets, opts = {}) {
     const lx = PAD.left + di * 100;
     const ly = H - 8;
     svg += `<rect x="${lx}" y="${ly - 8}" width="10" height="10" rx="2" fill="${ds_item.color}"/>`;
-    svg += `<text x="${lx + 14}" y="${ly}" font-size="10" fill="#64748b">${ds_item.label}</text>`;
+    svg += `<text x="${lx + 14}" y="${ly}" font-size="10" fill="#64748b">${escSvg(ds_item.label)}</text>`;
   });
 
   svg += '</svg>';
@@ -1040,7 +1076,7 @@ function renderScatterChart(container, dataPoints, opts = {}) {
     const color = d.type === 'Bug' ? '#ef4444' : '#3b82f6';
     const dot = `<circle cx="${x}" cy="${y}" r="3.5" fill="${color}" opacity="0.65" stroke="${color}" stroke-width="0.75" stroke-opacity="0.9"><title>#${d.id}: ${d.days}d</title></circle>`;
     if (d.url) {
-      svg += `<a href="${d.url}" target="_blank" style="cursor:pointer">${dot}</a>`;
+      svg += `<a href="${escSvg(d.url)}" target="_blank" style="cursor:pointer">${dot}</a>`;
     } else {
       svg += dot;
     }
@@ -1117,7 +1153,7 @@ function renderLineChart(container, datasets, opts = {}) {
     ds.data.forEach((d, i) => {
       const x = PAD.left + (i / (n - 1 || 1)) * chartW;
       const y = PAD.top + chartH * (1 - d.value / maxVal);
-      svg += `<circle cx="${x}" cy="${y}" r="2.5" fill="${ds.color}"><title>${d.label}: ${d.value}</title></circle>`;
+      svg += `<circle cx="${x}" cy="${y}" r="2.5" fill="${ds.color}"><title>${escSvg(d.label)}: ${d.value}</title></circle>`;
     });
   });
 
@@ -1125,7 +1161,7 @@ function renderLineChart(container, datasets, opts = {}) {
   labels.forEach((label, i) => {
     const cx = PAD.left + (i / (n - 1 || 1)) * chartW;
     const cy = PAD.top + chartH + 8;
-    svg += `<text transform="rotate(-45,${cx},${cy})" x="${cx}" y="${cy}" text-anchor="end" font-size="8" fill="#64748b">${label}</text>`;
+    svg += `<text transform="rotate(-45,${cx},${cy})" x="${cx}" y="${cy}" text-anchor="end" font-size="8" fill="#64748b">${escSvg(label)}</text>`;
   });
 
   // Legend
@@ -1133,7 +1169,7 @@ function renderLineChart(container, datasets, opts = {}) {
     const lx = PAD.left + di * 120;
     const ly = H - 8;
     svg += `<line x1="${lx}" y1="${ly - 3}" x2="${lx + 12}" y2="${ly - 3}" stroke="${ds.color}" stroke-width="2" ${ds.dashed ? 'stroke-dasharray="4,3"' : ''}/>`;
-    svg += `<text x="${lx + 16}" y="${ly}" font-size="9" fill="#64748b">${ds.label}</text>`;
+    svg += `<text x="${lx + 16}" y="${ly}" font-size="9" fill="#64748b">${escSvg(ds.label)}</text>`;
   });
 
   svg += '</svg>';
@@ -1192,7 +1228,7 @@ function renderThroughputPerPersonChart(container, data, opts = {}) {
   data.forEach((d, i) => {
     const cx = PAD.left + i * groupW + groupW / 2
     const cy = PAD.top + chartH + 8
-    svg += `<text transform="rotate(-45,${cx},${cy})" x="${cx}" y="${cy}" text-anchor="end" font-size="8" fill="#64748b">${d.label}</text>`
+    svg += `<text transform="rotate(-45,${cx},${cy})" x="${cx}" y="${cy}" text-anchor="end" font-size="8" fill="#64748b">${escSvg(d.label)}</text>`
   })
 
   svg += '</svg>'
@@ -1229,7 +1265,7 @@ function renderClosedByPersonChart(container, data, opts = {}) {
     const barH = ROW_H - 10;
 
     // Name
-    svg += `<text x="${PAD.left - 6}" y="${y + ROW_H / 2 + 3}" text-anchor="end" font-size="10" fill="currentColor">${short}</text>`;
+    svg += `<text x="${PAD.left - 6}" y="${y + ROW_H / 2 + 3}" text-anchor="end" font-size="10" fill="currentColor">${escSvg(short)}</text>`;
 
     // This week bar
     const barW = Math.max(1, (d.thisWeek / maxVal) * barMaxW);
@@ -1240,7 +1276,7 @@ function renderClosedByPersonChart(container, data, opts = {}) {
 
     // Average marker line (dashed vertical)
     const avgX = PAD.left + (d.avg / maxVal) * barMaxW;
-    svg += `<line x1="${avgX}" y1="${y + 3}" x2="${avgX}" y2="${y + ROW_H - 3}" stroke="#64748b" stroke-width="1.5" stroke-dasharray="3,2"><title>avg ${d.avg}/wk</title></line>`;
+    svg += `<line x1="${avgX}" y1="${y + 3}" x2="${avgX}" y2="${y + ROW_H - 3}" stroke="#64748b" stroke-width="1.5" stroke-dasharray="3,2"><title>avg ${escSvg(d.avg)}/wk</title></line>`;
 
     // Avg/wk label on right
     svg += `<text x="${PAD.left + chartW + 6}" y="${y + ROW_H / 2 + 3}" font-size="9" fill="#64748b">${d.avg}</text>`;
@@ -1282,7 +1318,7 @@ function renderStaleItemsChart(container, staleData, opts = {}) {
   data.forEach((d, i) => {
     const y = PAD.top + i * ROW_H;
     const barW = Math.max(1, (d.count / maxCount) * chartW);
-    svg += `<text x="${PAD.left - 6}" y="${y + ROW_H / 2 + 3}" text-anchor="end" font-size="9" fill="currentColor">${d.col}</text>`;
+    svg += `<text x="${PAD.left - 6}" y="${y + ROW_H / 2 + 3}" text-anchor="end" font-size="9" fill="currentColor">${escSvg(d.col)}</text>`;
     svg += `<rect x="${PAD.left}" y="${y + 3}" width="${barW}" height="${ROW_H - 6}" rx="3" fill="#ef4444" opacity="0.6"/>`;
     svg += `<text x="${PAD.left + barW + 4}" y="${y + ROW_H / 2 + 3}" font-size="9" font-weight="600" fill="#fca5a5">${d.count}</text>`;
   });
@@ -1295,9 +1331,9 @@ function renderStaleItemsChart(container, staleData, opts = {}) {
 function renderMetricCard(container, metrics) {
   container.innerHTML = metrics.map(m =>
     `<div style="text-align:center;padding:.25rem .5rem">
-      <div style="font-size:1.4rem;font-weight:700;color:${m.color || 'var(--text)'};line-height:1">${m.value}</div>
-      <div style="font-size:.625rem;color:var(--muted);margin-top:.1rem">${m.label}</div>
-      ${m.sub ? `<div style="font-size:.625rem;color:var(--muted);margin-top:.05rem">${m.sub}</div>` : ''}
+      <div style="font-size:1.4rem;font-weight:700;color:${m.color || 'var(--text)'};line-height:1">${escSvg(m.value)}</div>
+      <div style="font-size:.625rem;color:var(--muted);margin-top:.1rem">${escSvg(m.label)}</div>
+      ${m.sub ? `<div style="font-size:.625rem;color:var(--muted);margin-top:.05rem">${escSvg(m.sub)}</div>` : ''}
     </div>`
   ).join('');
   container.style.cssText = 'display:flex;gap:.75rem;flex-wrap:wrap;justify-content:center';
@@ -1347,7 +1383,7 @@ function renderPriorityAgeChart(container, data, opts = {}) {
       if (!count) continue;
       const barH = (count / maxVal) * chartH;
       const y = PAD.top + chartH - yOffset - barH;
-      svg += `<rect x="${x}" y="${y}" width="${barW}" height="${barH}" rx="2" fill="${row.color}" opacity="0.85"><title>${row.label}: ${count}</title></rect>`;
+      svg += `<rect x="${x}" y="${y}" width="${barW}" height="${barH}" rx="2" fill="${row.color}" opacity="0.85"><title>${escSvg(row.label)}: ${count}</title></rect>`;
       yOffset += barH;
     }
     if (totals[bi] > 0) {
@@ -1359,7 +1395,7 @@ function renderPriorityAgeChart(container, data, opts = {}) {
   data.bands.forEach((label, i) => {
     const cx = PAD.left + i * groupW + groupW / 2;
     const cy = PAD.top + chartH + 8;
-    svg += `<text transform="rotate(-35,${cx},${cy})" x="${cx}" y="${cy}" text-anchor="end" font-size="9" fill="#64748b">${label}</text>`;
+    svg += `<text transform="rotate(-35,${cx},${cy})" x="${cx}" y="${cy}" text-anchor="end" font-size="9" fill="#64748b">${escSvg(label)}</text>`;
   });
 
   // Legend (right side)
@@ -1367,7 +1403,7 @@ function renderPriorityAgeChart(container, data, opts = {}) {
     const lx = PAD.left + chartW + 6;
     const ly = PAD.top + i * 16 + 10;
     svg += `<rect x="${lx}" y="${ly - 7}" width="9" height="9" rx="2" fill="${row.color}"/>`;
-    svg += `<text x="${lx + 13}" y="${ly}" font-size="9" fill="#64748b">${row.label}</text>`;
+    svg += `<text x="${lx + 13}" y="${ly}" font-size="9" fill="#64748b">${escSvg(row.label)}</text>`;
   });
 
   svg += '</svg>';
@@ -1419,8 +1455,8 @@ function renderCFDChart(container, data, opts = {}) {
 
   // Dots with tooltips
   data.forEach((d, i) => {
-    svg += `<circle cx="${px(i)}" cy="${py(d.arrived)}" r="2.5" fill="#6366f1"><title>${d.label}: ${d.arrived} arrived</title></circle>`;
-    svg += `<circle cx="${px(i)}" cy="${py(d.closed)}" r="2.5" fill="#10b981"><title>${d.label}: ${d.closed} closed</title></circle>`;
+    svg += `<circle cx="${px(i)}" cy="${py(d.arrived)}" r="2.5" fill="#6366f1"><title>${escSvg(d.label)}: ${d.arrived} arrived</title></circle>`;
+    svg += `<circle cx="${px(i)}" cy="${py(d.closed)}" r="2.5" fill="#10b981"><title>${escSvg(d.label)}: ${d.closed} closed</title></circle>`;
   });
 
   // Current WIP annotation (last point gap)
@@ -1437,7 +1473,7 @@ function renderCFDChart(container, data, opts = {}) {
   data.forEach((d, i) => {
     const cx = px(i);
     const cy = PAD.top + chartH + 8;
-    svg += `<text transform="rotate(-45,${cx},${cy})" x="${cx}" y="${cy}" text-anchor="end" font-size="8" fill="#64748b">${d.label}</text>`;
+    svg += `<text transform="rotate(-45,${cx},${cy})" x="${cx}" y="${cy}" text-anchor="end" font-size="8" fill="#64748b">${escSvg(d.label)}</text>`;
   });
 
   // Legend
@@ -1457,13 +1493,13 @@ function renderCFDChart(container, data, opts = {}) {
 
 function getTheme() {
   return new Promise(resolve =>
-    chrome.storage.local.get('theme', r => resolve(r.theme || 'dark'))
+    chrome.storage.local.get(STORAGE_KEYS.theme, r => resolve(r[STORAGE_KEYS.theme] || 'dark'))
   )
 }
 
 function setTheme(theme) {
   return new Promise(resolve =>
-    chrome.storage.local.set({ theme }, resolve)
+    chrome.storage.local.set({ [STORAGE_KEYS.theme]: theme }, resolve)
   )
 }
 
