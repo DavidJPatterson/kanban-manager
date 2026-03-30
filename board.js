@@ -1043,7 +1043,14 @@ function buildPodPanel(pod) {
 
 async function renderAll(data) {
   if (!data?.pods) return;
-  const pods = Object.values(data.pods);
+  // Sort pods by the order defined in settings to keep tabs stable across refreshes
+  const settings = await getSettings()
+  const podOrder = (settings.pods || []).map(p => p.id)
+  const pods = Object.values(data.pods).sort((a, b) => {
+    const ai = podOrder.indexOf(a.id)
+    const bi = podOrder.indexOf(b.id)
+    return (ai === -1 ? Infinity : ai) - (bi === -1 ? Infinity : bi)
+  })
   if (!pods.length) { showBanner('No pods configured. Click ⚙ Settings to add pods.', 'err'); return; }
 
   // Remove loading skeleton on first render
