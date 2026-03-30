@@ -45,7 +45,8 @@ async function refreshData() {
   try {
     const settings = await getSettings();
     if (!settings.pat || !settings.pods?.length) return;
-    const data = await fetchAllPods(settings);
+    const previous = await getCachedData();
+    const data = await fetchAllPods(settings, previous);
     await setCachedData(data);
     chrome.runtime.sendMessage({ type: 'DATA_UPDATED', data }).catch(() => {});
   } catch (err) {

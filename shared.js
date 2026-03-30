@@ -4,6 +4,7 @@ const DEFAULT_SETTINGS = {
   org: '',
   project: '',
   refreshInterval: 15,
+  staleDays: 2,
   pat: '',
   pods: [],
   overviewCharts: {
@@ -24,11 +25,22 @@ const DEFAULT_SETTINGS = {
   }
 };
 
+const STORAGE_KEYS = {
+  settings: 'settings',
+  cachedData: 'cachedData',
+  arrivedAtCache: 'arrivedAtCache',
+  arrivedAtCacheVersion: 'arrivedAtCacheVersion',
+  startedAtCache: 'startedAtCache',
+  startedAtCacheVersion: 'startedAtCacheVersion',
+  boardFilters: 'boardFilters',
+  theme: 'theme',
+}
+
 // ─── Storage helpers ───────────────────────────────────────────────────────────
 
 function getSettings() {
   return new Promise(resolve =>
-    chrome.storage.local.get('settings', r => {
+    chrome.storage.local.get(STORAGE_KEYS.settings, r => {
       const s = { ...DEFAULT_SETTINGS, ...(r.settings || {}) };
       // Migrate from old single-areaPath format
       if (s.areaPath && (!s.pods || s.pods.length === 0)) {
@@ -46,12 +58,12 @@ function generateId() {
 
 function getCachedData() {
   return new Promise(resolve =>
-    chrome.storage.local.get('cachedData', r => resolve(r.cachedData || null))
+    chrome.storage.local.get(STORAGE_KEYS.cachedData, r => resolve(r.cachedData || null))
   );
 }
 
 function setCachedData(data) {
-  return new Promise(resolve => chrome.storage.local.set({ cachedData: data }, resolve));
+  return new Promise(resolve => chrome.storage.local.set({ [STORAGE_KEYS.cachedData]: data }, resolve));
 }
 
 // Cache version — bump when arrival logic changes to force a re-fetch of all items.
@@ -59,13 +71,13 @@ const ARRIVED_CACHE_VERSION = 3;
 
 function getArrivedAtCache() {
   return new Promise(resolve =>
-    chrome.storage.local.get(['arrivedAtCache', 'arrivedAtCacheVersion'], r => {
-      if (r.arrivedAtCacheVersion !== ARRIVED_CACHE_VERSION) {
+    chrome.storage.local.get([STORAGE_KEYS.arrivedAtCache, STORAGE_KEYS.arrivedAtCacheVersion], r => {
+      if (r[STORAGE_KEYS.arrivedAtCacheVersion] !== ARRIVED_CACHE_VERSION) {
         // Logic changed — wipe stale cache
-        chrome.storage.local.set({ arrivedAtCache: {}, arrivedAtCacheVersion: ARRIVED_CACHE_VERSION });
+        chrome.storage.local.set({ [STORAGE_KEYS.arrivedAtCache]: {}, [STORAGE_KEYS.arrivedAtCacheVersion]: ARRIVED_CACHE_VERSION });
         resolve({});
       } else {
-        resolve(r.arrivedAtCache || {});
+        resolve(r[STORAGE_KEYS.arrivedAtCache] || {});
       }
     })
   );
@@ -74,18 +86,32 @@ function getArrivedAtCache() {
 async function updateArrivedAtCache(entries) {
   const cache = await getArrivedAtCache();
   Object.assign(cache, entries);
-  return new Promise(resolve => chrome.storage.local.set({ arrivedAtCache: cache }, resolve));
+  return new Promise(resolve => chrome.storage.local.set({ [STORAGE_KEYS.arrivedAtCache]: cache }, resolve));
 }
 
 // ─── ADO REST API ──────────────────────────────────────────────────────────────
 
+const FETCH_TIMEOUT_MS = 15000
+
+/**
+ * Fetch from Azure DevOps REST API with Basic auth, 15s timeout, and retry.
+ * Retries up to 3 times with exponential backoff on network errors, 5xx, and 429.
+ * Throws on 4xx immediately (err.status is set for callers to inspect).
+ * @param {string} url - Full ADO API URL
+ * @param {{ pat: string }} settings - Must include a PAT for Basic auth
+ * @param {RequestInit} [options] - Additional fetch options (method, body, etc.)
+ * @returns {Promise<any>} Parsed JSON response
+ */
 async function adoFetch(url, settings, options = {}) {
   const MAX_RETRIES = 3;
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
     let resp;
     try {
       resp = await fetch(url, {
         ...options,
+        signal: controller.signal,
         headers: {
           'Authorization': `Basic ${btoa(':' + settings.pat)}`,
           'Content-Type': 'application/json',
@@ -93,16 +119,20 @@ async function adoFetch(url, settings, options = {}) {
         }
       });
     } catch (networkErr) {
-      // Network-level failure (offline, DNS, CORS etc.) — retry with backoff
+      // Network-level failure (offline, DNS, CORS, timeout abort) — retry with backoff
+      clearTimeout(timeoutId)
       if (attempt < MAX_RETRIES) {
         await new Promise(r => setTimeout(r, (2 ** attempt) * 1000));
         continue;
       }
       throw networkErr;
+    } finally {
+      clearTimeout(timeoutId)
     }
     if (!resp.ok) {
       const body = await resp.text().catch(() => '');
       const err = new Error(`ADO ${resp.status}: ${resp.statusText} — ${body.slice(0, 200)}`);
+      err.status = resp.status
       // Retry only on server errors (5xx) or rate limit (429); never on 4xx auth/not-found
       if ((resp.status >= 500 || resp.status === 429) && attempt < MAX_RETRIES) {
         await new Promise(r => setTimeout(r, (2 ** attempt) * 1000));
@@ -128,6 +158,7 @@ async function getWorkItemsBatch(ids, settings) {
   const FIELDS = [
     'System.Id', 'System.Title', 'System.State', 'System.AssignedTo',
     'System.WorkItemType', 'System.CreatedDate', 'System.BoardColumn',
+    'System.BoardLane',
     'Microsoft.VSTS.Scheduling.StoryPoints', 'Microsoft.VSTS.Common.Priority',
     'System.Tags', 'Microsoft.VSTS.Common.ClosedDate',
     'Microsoft.VSTS.Common.ResolvedDate', 'System.ChangedDate',
@@ -196,11 +227,17 @@ async function getItemArrivedAt(itemId, podAreaPath, settings) {
   }
 }
 
-// Enriches items with arrivedAt dates, using a persistent cache to avoid re-fetching.
-// Cache is keyed by "podAreaPath:itemId" so moves between pods are handled correctly.
-// - Cached date string  → use it directly
-// - null (API failure)  → not cached, temporary changedDate heuristic used until next refresh
-// - 'native' sentinel   → item created in pod; cached as item.created (no false positives)
+/**
+ * Enrich items with arrivedAt dates via a persistent chrome.storage cache.
+ * Cache key: "podAreaPath:itemId" — handles moves between pods correctly.
+ * For uncached items, fetches update history from ADO (concurrency-limited to 10).
+ * Stale entries (item changed >1 day after cached arrival) are invalidated and re-fetched.
+ * Falls back to changedDate heuristic when API calls fail (not cached, retried next refresh).
+ * @param {Object[]} items - Work items with id, created, changedDate properties
+ * @param {string} podAreaPath - Area path of the pod (used as cache key prefix)
+ * @param {{ org: string, project: string, pat: string }} settings
+ * @returns {Promise<Object[]>} Items with arrivedAt property set
+ */
 async function enrichWithArrivedAt(items, podAreaPath, settings) {
   const cache = await getArrivedAtCache();
 
@@ -244,14 +281,14 @@ async function enrichWithArrivedAt(items, podAreaPath, settings) {
       const freshCache = await getArrivedAtCache();
       for (const key of invalidated) delete freshCache[key];
       Object.assign(freshCache, newEntries);
-      await new Promise(resolve => chrome.storage.local.set({ arrivedAtCache: freshCache }, resolve));
+      await new Promise(resolve => chrome.storage.local.set({ [STORAGE_KEYS.arrivedAtCache]: freshCache }, resolve));
       Object.assign(cache, newEntries);
     }
   } else if (invalidated.length > 0) {
     // No uncached items but we invalidated some — persist the removals
     const freshCache = await getArrivedAtCache();
     for (const key of invalidated) delete freshCache[key];
-    await new Promise(resolve => chrome.storage.local.set({ arrivedAtCache: freshCache }, resolve));
+    await new Promise(resolve => chrome.storage.local.set({ [STORAGE_KEYS.arrivedAtCache]: freshCache }, resolve));
   }
 
   return items.map(item => {
@@ -320,7 +357,14 @@ async function fetchWipLimits(pod, settings) {
   }
 }
 
-// Fetch data for a single pod area path
+/**
+ * Fetch all work items for a single pod. Runs two WIQL queries in parallel:
+ * one for active items under the pod's area path, one for items closed/resolved
+ * in the last 90 days. Results are merged, mapped, and enriched with arrival dates.
+ * @param {{ areaPath: string }} pod - Pod config with an ADO area path
+ * @param {Object} settings - Settings with org, project, pat
+ * @returns {Promise<Object[]>} Enriched work items
+ */
 async function fetchPodData(pod, settings) {
   const ap = pod.areaPath.replace(/'/g, "''");
   const ninetyDaysAgo = new Date();
@@ -353,18 +397,31 @@ async function fetchPodData(pod, settings) {
   return await enrichWithArrivedAt(items, pod.areaPath, settings);
 }
 
-// Fetch all configured pods in parallel
-async function fetchAllPods(settings) {
+/**
+ * Fetch data for all configured pods in parallel.
+ * Pods that returned 404 last cycle are skipped (their cached error is reused).
+ * The 404 flag is cleared when settings are saved (options.js removes cachedData).
+ * @param {Object} settings - Settings with pods[], org, project, pat
+ * @param {Object} [previousData] - Previous cachedData; pods with error404 are skipped
+ * @returns {Promise<{ fetchedAt: string, pods: Object }>} Pod results keyed by pod.id
+ */
+async function fetchAllPods(settings, previousData) {
   const pods = settings.pods || [];
   const podResults = {};
+  const prev = previousData?.pods || {}
 
   await Promise.all(pods.map(async pod => {
+    // Skip pods whose area path was not found last time — retried when settings change
+    if (prev[pod.id]?.error404) {
+      podResults[pod.id] = prev[pod.id]
+      return
+    }
     try {
       const items = await fetchPodData(pod, settings);
       const { wipLimits, teamId, boardName } = await fetchWipLimits(pod, settings);
       podResults[pod.id] = { id: pod.id, name: pod.name, areaPath: pod.areaPath, items, wipLimits, teamId, boardName, fetchedAt: new Date().toISOString(), error: null };
     } catch (err) {
-      podResults[pod.id] = { id: pod.id, name: pod.name, areaPath: pod.areaPath, items: [], wipLimits: {}, fetchedAt: new Date().toISOString(), error: err.message };
+      podResults[pod.id] = { id: pod.id, name: pod.name, areaPath: pod.areaPath, items: [], wipLimits: {}, fetchedAt: new Date().toISOString(), error: err.message, error404: err.status === 404 };
     }
   }));
 
@@ -401,6 +458,7 @@ function mapItem(raw, settings) {
     closed: f['Microsoft.VSTS.Common.ClosedDate'] || null,
     resolved: f['Microsoft.VSTS.Common.ResolvedDate'] || null,
     boardColumn: f['System.BoardColumn'] || null,
+    boardLane: f['System.BoardLane'] || null,
     sp: f['Microsoft.VSTS.Scheduling.StoryPoints'] || null,
     priority: f['Microsoft.VSTS.Common.Priority'] || 2,
     tags,
@@ -611,23 +669,53 @@ function calcFlowEfficiency(ctData) {
 
 // ─── Stale Items: active items with no state change in X days ────────────────
 
-function calcStaleItems(items, staleDays = 14) {
+function isBlocked(item) {
+  const col = (item.boardColumn || '').toLowerCase()
+  const lane = (item.boardLane || '').toLowerCase()
+  const hasTag = (item.tags || []).some(t => t.toLowerCase() === 'blocked')
+  return col.includes('blocked') || lane.includes('blocked') || hasTag
+}
+
+function calcStaleItems(items, staleDays = 2) {
   const cutoff = Date.now() - staleDays * 86400000;
-  const active = items.filter(i => !['Closed', 'Removed', 'Resolved'].includes(i.state));
+  const active = items.filter(i => i.state === 'Active');
+
+  // Stale: active items with no change beyond threshold
   const stale = active.filter(i => {
     const changed = i.changedDate ? new Date(i.changedDate).getTime() : 0;
     return changed < cutoff;
   });
-  // Group by column
-  const byCol = {};
-  for (const item of stale) {
-    const col = item.boardColumn || item.state || 'Unknown';
-    if (!byCol[col]) byCol[col] = 0;
-    byCol[col]++;
-  }
+
+  // Blocked: all active blocked items, regardless of how long
+  const blockedNotStale = active.filter(i => {
+    const changed = i.changedDate ? new Date(i.changedDate).getTime() : 0;
+    return changed >= cutoff && isBlocked(i)
+  });
+
+  const combined = [...stale, ...blockedNotStale]
+  let blockedCount = 0
+  const result = combined.map(item => {
+    const blocked = isBlocked(item)
+    if (blocked) blockedCount++
+    const staleDaysActual = Math.floor((Date.now() - new Date(item.changedDate).getTime()) / 86400000)
+    return {
+      id: item.id,
+      title: item.title,
+      assignee: item.assignee,
+      boardColumn: item.boardColumn || 'Unknown',
+      staleDaysActual,
+      blocked,
+      url: item.url
+    }
+  }).sort((a, b) => {
+    // Blocked first, then by stalest
+    if (a.blocked !== b.blocked) return a.blocked ? -1 : 1
+    return b.staleDaysActual - a.staleDaysActual
+  })
   return {
-    total: stale.length,
-    byColumn: Object.entries(byCol).map(([col, count]) => ({ col, count })).sort((a, b) => b.count - a.count)
+    total: result.length,
+    blocked: blockedCount,
+    items: result
   };
 }
 
@@ -732,22 +820,25 @@ const ASSIGNEE_COLORS = [
   '#6366f1','#f59e0b','#10b981','#8b5cf6','#ef4444',
   '#06b6d4','#f97316','#84cc16','#ec4899','#14b8a6'
 ];
+
+function hashStr(s) {
+  let h = 5381
+  for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) >>> 0
+  return h
+}
+
 const _colorMap = {};
-let _colorIdx = 0;
 function assigneeColor(name) {
   if (!name) return '#475569';
-  if (!_colorMap[name]) {
-    _colorMap[name] = ASSIGNEE_COLORS[_colorIdx++ % ASSIGNEE_COLORS.length];
-  }
+  if (!_colorMap[name]) _colorMap[name] = ASSIGNEE_COLORS[hashStr(name) % ASSIGNEE_COLORS.length]
   return _colorMap[name];
 }
 
-// Consistent colour per pod (stable across renders)
+// Consistent colour per pod (stable across renders via hash)
 const POD_PALETTE = ['#6366f1','#f59e0b','#10b981','#8b5cf6','#ef4444','#06b6d4','#f97316','#84cc16'];
 const _podColorMap = {};
-let _podColorIdx = 0;
 function podColor(podId) {
-  if (!_podColorMap[podId]) _podColorMap[podId] = POD_PALETTE[_podColorIdx++ % POD_PALETTE.length];
+  if (!_podColorMap[podId]) _podColorMap[podId] = POD_PALETTE[hashStr(podId) % POD_PALETTE.length]
   return _podColorMap[podId];
 }
 
@@ -786,12 +877,12 @@ const STARTED_CACHE_NONE = '__none__';
 
 function getStartedAtCache() {
   return new Promise(resolve =>
-    chrome.storage.local.get(['startedAtCache', 'startedAtCacheVersion'], r => {
-      if (r.startedAtCacheVersion !== STARTED_CACHE_VERSION) {
-        chrome.storage.local.set({ startedAtCache: {}, startedAtCacheVersion: STARTED_CACHE_VERSION });
+    chrome.storage.local.get([STORAGE_KEYS.startedAtCache, STORAGE_KEYS.startedAtCacheVersion], r => {
+      if (r[STORAGE_KEYS.startedAtCacheVersion] !== STARTED_CACHE_VERSION) {
+        chrome.storage.local.set({ [STORAGE_KEYS.startedAtCache]: {}, [STORAGE_KEYS.startedAtCacheVersion]: STARTED_CACHE_VERSION });
         resolve({});
       } else {
-        resolve(r.startedAtCache || {});
+        resolve(r[STORAGE_KEYS.startedAtCache] || {});
       }
     })
   );
@@ -821,6 +912,14 @@ async function getItemStartedAt(itemId, settings) {
   }
 }
 
+/**
+ * Enrich closed items with startedAt dates (when they first entered In Progress).
+ * Uses a persistent cache keyed by item ID. Uncached items trigger ADO update-history
+ * lookups (concurrency-limited to 10). Items with no activation are cached as '__none__'.
+ * @param {Object[]} items - Work items (only closed items are enriched)
+ * @param {Object} settings - Settings with org, project, pat
+ * @returns {Promise<Object[]>} Items with startedAt property set (or null)
+ */
 async function enrichWithStartedAt(items, settings) {
   const cache = await getStartedAtCache();
   const closedItems = items.filter(i => i.closed);
@@ -846,7 +945,7 @@ async function enrichWithStartedAt(items, settings) {
     if (Object.keys(newEntries).length > 0) {
       const freshCache = await getStartedAtCache();
       Object.assign(freshCache, newEntries);
-      await new Promise(resolve => chrome.storage.local.set({ startedAtCache: freshCache }, resolve));
+      await new Promise(resolve => chrome.storage.local.set({ [STORAGE_KEYS.startedAtCache]: freshCache }, resolve));
       Object.assign(cache, newEntries);
     }
   }
@@ -859,6 +958,13 @@ async function enrichWithStartedAt(items, settings) {
 
 // ─── Cycle Time Calculation ───────────────────────────────────────────────────
 
+/**
+ * Calculate cycle times for items closed in the last 90 days.
+ * Returns arrivalToClose (days from arrivedAt to closed) and inProgressToClose
+ * (days from startedAt to closed, null if startedAt is unknown).
+ * @param {Object[]} items - Work items with closed, arrivedAt, startedAt
+ * @returns {{ id: number, type: string, arrivalToClose: number|null, inProgressToClose: number|null, closedDate: Date }[]}
+ */
 function calcCycleTimes(items) {
   const ninetyDaysAgo = new Date();
   ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
@@ -897,8 +1003,21 @@ function calcBurndown(items, targetPI) {
   return data;
 }
 
+// ─── SVG text escaping ────────────────────────────────────────────────────────
+
+function escSvg(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')
+}
+
 // ─── Simple SVG bar chart ──────────────────────────────────────────────────────
 
+/**
+ * Render a vertical bar chart as inline SVG. Supports single or stacked datasets,
+ * rotated x-axis labels, optional average line, and a colour legend.
+ * @param {HTMLElement} container - DOM element to inject SVG into (via innerHTML)
+ * @param {{ label: string, color: string, data: { label: string, count: number }[] }[]} datasets
+ * @param {{ width?: number, height?: number, stacked?: boolean, avgLine?: { value: number, label?: string, color?: string } }} [opts]
+ */
 function renderBarChart(container, datasets, opts = {}) {
   const W = opts.width || 600;
   const H = opts.height || 160;
@@ -939,7 +1058,7 @@ function renderBarChart(container, datasets, opts = {}) {
         if (val <= 0) return
         const barH = (val / maxVal) * chartH
         cumY -= barH
-        svg += `<rect x="${x}" y="${cumY}" width="${barW}" height="${barH}" rx="2" fill="${ds_item.color}" opacity="0.85"><title>${ds_item.data[i].label}: ${ds_item.label} ${val}</title></rect>`
+        svg += `<rect x="${x}" y="${cumY}" width="${barW}" height="${barH}" rx="2" fill="${ds_item.color}" opacity="0.85"><title>${escSvg(ds_item.data[i].label)}: ${escSvg(ds_item.label)} ${val}</title></rect>`
       })
       if (total > 0) {
         const totalH = (total / maxVal) * chartH
@@ -953,7 +1072,7 @@ function renderBarChart(container, datasets, opts = {}) {
         const barH = (d.count / maxVal) * chartH;
         const x = PAD.left + i * groupW + di * barW + 4;
         const y = PAD.top + chartH - barH;
-        svg += `<rect x="${x}" y="${y}" width="${barW}" height="${barH}" rx="3" fill="${ds_item.color}" opacity="0.85"><title>${d.label}: ${d.count}</title></rect>`;
+        svg += `<rect x="${x}" y="${y}" width="${barW}" height="${barH}" rx="3" fill="${ds_item.color}" opacity="0.85"><title>${escSvg(d.label)}: ${d.count}</title></rect>`;
         if (d.count > 0) {
           svg += `<text x="${x + barW / 2}" y="${y - 3}" text-anchor="middle" font-size="9" fill="${ds_item.color}">${d.count}</text>`;
         }
@@ -965,7 +1084,7 @@ function renderBarChart(container, datasets, opts = {}) {
   labels.forEach((label, i) => {
     const cx = PAD.left + i * groupW + groupW / 2;
     const cy = PAD.top + chartH + 8;
-    svg += `<text transform="rotate(-45,${cx},${cy})" x="${cx}" y="${cy}" text-anchor="end" font-size="8" fill="#64748b">${label}</text>`;
+    svg += `<text transform="rotate(-45,${cx},${cy})" x="${cx}" y="${cy}" text-anchor="end" font-size="8" fill="#64748b">${escSvg(label)}</text>`;
   });
 
   // Average line (optional — pass opts.avgLine = { value, label, color })
@@ -973,7 +1092,7 @@ function renderBarChart(container, datasets, opts = {}) {
     const avgY = PAD.top + chartH * (1 - opts.avgLine.value / maxVal)
     const col = opts.avgLine.color || '#64748b'
     svg += `<line x1="${PAD.left}" y1="${avgY}" x2="${PAD.left + chartW}" y2="${avgY}" stroke="${col}" stroke-width="1.5" stroke-dasharray="6,3" opacity="0.8"/>`
-    svg += `<text x="${PAD.left + chartW + 3}" y="${avgY + 3}" font-size="8" fill="${col}">${opts.avgLine.label || 'avg'} ${opts.avgLine.value}</text>`
+    svg += `<text x="${PAD.left + chartW + 3}" y="${avgY + 3}" font-size="8" fill="${col}">${escSvg(opts.avgLine.label || 'avg')} ${opts.avgLine.value}</text>`
   }
 
   // Legend
@@ -981,7 +1100,7 @@ function renderBarChart(container, datasets, opts = {}) {
     const lx = PAD.left + di * 100;
     const ly = H - 8;
     svg += `<rect x="${lx}" y="${ly - 8}" width="10" height="10" rx="2" fill="${ds_item.color}"/>`;
-    svg += `<text x="${lx + 14}" y="${ly}" font-size="10" fill="#64748b">${ds_item.label}</text>`;
+    svg += `<text x="${lx + 14}" y="${ly}" font-size="10" fill="#64748b">${escSvg(ds_item.label)}</text>`;
   });
 
   svg += '</svg>';
@@ -990,6 +1109,13 @@ function renderBarChart(container, datasets, opts = {}) {
 
 // ─── SVG scatter chart (cycle time) ───────────────────────────────────────────
 
+/**
+ * Render a scatter plot of cycle times as inline SVG. Each dot is a closed work item
+ * positioned by close date (x) and days (y), coloured by type. Shows p50/p85 lines.
+ * @param {HTMLElement} container
+ * @param {{ id: number, days: number, closedDate: Date, type: string, url?: string }[]} dataPoints
+ * @param {{ width?: number, height?: number }} [opts]
+ */
 function renderScatterChart(container, dataPoints, opts = {}) {
   const W = opts.width || 600;
   const H = opts.height || 200;
@@ -1040,7 +1166,7 @@ function renderScatterChart(container, dataPoints, opts = {}) {
     const color = d.type === 'Bug' ? '#ef4444' : '#3b82f6';
     const dot = `<circle cx="${x}" cy="${y}" r="3.5" fill="${color}" opacity="0.65" stroke="${color}" stroke-width="0.75" stroke-opacity="0.9"><title>#${d.id}: ${d.days}d</title></circle>`;
     if (d.url) {
-      svg += `<a href="${d.url}" target="_blank" style="cursor:pointer">${dot}</a>`;
+      svg += `<a href="${escSvg(d.url)}" target="_blank" style="cursor:pointer">${dot}</a>`;
     } else {
       svg += dot;
     }
@@ -1068,6 +1194,13 @@ function renderScatterChart(container, dataPoints, opts = {}) {
 
 // ─── SVG line chart (burndown) ────────────────────────────────────────────────
 
+/**
+ * Render a multi-line chart as inline SVG. Supports dashed lines, area fill,
+ * dot tooltips, and rotated x-axis labels. Used for burndown and WIP trend.
+ * @param {HTMLElement} container
+ * @param {{ label: string, color: string, data: { label: string, value: number }[], dashed?: boolean, fill?: boolean }[]} datasets
+ * @param {{ width?: number, height?: number }} [opts]
+ */
 function renderLineChart(container, datasets, opts = {}) {
   const W = opts.width || 600;
   const H = opts.height || 200;
@@ -1117,7 +1250,7 @@ function renderLineChart(container, datasets, opts = {}) {
     ds.data.forEach((d, i) => {
       const x = PAD.left + (i / (n - 1 || 1)) * chartW;
       const y = PAD.top + chartH * (1 - d.value / maxVal);
-      svg += `<circle cx="${x}" cy="${y}" r="2.5" fill="${ds.color}"><title>${d.label}: ${d.value}</title></circle>`;
+      svg += `<circle cx="${x}" cy="${y}" r="2.5" fill="${ds.color}"><title>${escSvg(d.label)}: ${d.value}</title></circle>`;
     });
   });
 
@@ -1125,7 +1258,7 @@ function renderLineChart(container, datasets, opts = {}) {
   labels.forEach((label, i) => {
     const cx = PAD.left + (i / (n - 1 || 1)) * chartW;
     const cy = PAD.top + chartH + 8;
-    svg += `<text transform="rotate(-45,${cx},${cy})" x="${cx}" y="${cy}" text-anchor="end" font-size="8" fill="#64748b">${label}</text>`;
+    svg += `<text transform="rotate(-45,${cx},${cy})" x="${cx}" y="${cy}" text-anchor="end" font-size="8" fill="#64748b">${escSvg(label)}</text>`;
   });
 
   // Legend
@@ -1133,7 +1266,7 @@ function renderLineChart(container, datasets, opts = {}) {
     const lx = PAD.left + di * 120;
     const ly = H - 8;
     svg += `<line x1="${lx}" y1="${ly - 3}" x2="${lx + 12}" y2="${ly - 3}" stroke="${ds.color}" stroke-width="2" ${ds.dashed ? 'stroke-dasharray="4,3"' : ''}/>`;
-    svg += `<text x="${lx + 16}" y="${ly}" font-size="9" fill="#64748b">${ds.label}</text>`;
+    svg += `<text x="${lx + 16}" y="${ly}" font-size="9" fill="#64748b">${escSvg(ds.label)}</text>`;
   });
 
   svg += '</svg>';
@@ -1192,7 +1325,7 @@ function renderThroughputPerPersonChart(container, data, opts = {}) {
   data.forEach((d, i) => {
     const cx = PAD.left + i * groupW + groupW / 2
     const cy = PAD.top + chartH + 8
-    svg += `<text transform="rotate(-45,${cx},${cy})" x="${cx}" y="${cy}" text-anchor="end" font-size="8" fill="#64748b">${d.label}</text>`
+    svg += `<text transform="rotate(-45,${cx},${cy})" x="${cx}" y="${cy}" text-anchor="end" font-size="8" fill="#64748b">${escSvg(d.label)}</text>`
   })
 
   svg += '</svg>'
@@ -1201,6 +1334,13 @@ function renderThroughputPerPersonChart(container, data, opts = {}) {
 
 // ─── SVG horizontal bar chart (closed by person with history) ────────────────
 
+/**
+ * Render horizontal bar chart showing items closed per person this week,
+ * with average marker, count label, avg/wk column, and 8-week sparkline trend.
+ * @param {HTMLElement} container
+ * @param {{ name: string, thisWeek: number, avg: number, total: number, weekly: number[] }[]} data
+ * @param {{ width?: number }} [opts]
+ */
 function renderClosedByPersonChart(container, data, opts = {}) {
   if (!data.length) {
     container.innerHTML = '<div style="font-size:.75rem;color:var(--muted, #64748b);padding:.5rem">No items closed by assignees</div>';
@@ -1229,7 +1369,7 @@ function renderClosedByPersonChart(container, data, opts = {}) {
     const barH = ROW_H - 10;
 
     // Name
-    svg += `<text x="${PAD.left - 6}" y="${y + ROW_H / 2 + 3}" text-anchor="end" font-size="10" fill="currentColor">${short}</text>`;
+    svg += `<text x="${PAD.left - 6}" y="${y + ROW_H / 2 + 3}" text-anchor="end" font-size="10" fill="currentColor">${escSvg(short)}</text>`;
 
     // This week bar
     const barW = Math.max(1, (d.thisWeek / maxVal) * barMaxW);
@@ -1240,7 +1380,7 @@ function renderClosedByPersonChart(container, data, opts = {}) {
 
     // Average marker line (dashed vertical)
     const avgX = PAD.left + (d.avg / maxVal) * barMaxW;
-    svg += `<line x1="${avgX}" y1="${y + 3}" x2="${avgX}" y2="${y + ROW_H - 3}" stroke="#64748b" stroke-width="1.5" stroke-dasharray="3,2"><title>avg ${d.avg}/wk</title></line>`;
+    svg += `<line x1="${avgX}" y1="${y + 3}" x2="${avgX}" y2="${y + ROW_H - 3}" stroke="#64748b" stroke-width="1.5" stroke-dasharray="3,2"><title>avg ${escSvg(d.avg)}/wk</title></line>`;
 
     // Avg/wk label on right
     svg += `<text x="${PAD.left + chartW + 6}" y="${y + ROW_H / 2 + 3}" font-size="9" fill="#64748b">${d.avg}</text>`;
@@ -1265,29 +1405,39 @@ function renderClosedByPersonChart(container, data, opts = {}) {
 
 // ─── SVG horizontal bar chart (stale items by column) ────────────────────────
 
-function renderStaleItemsChart(container, staleData, opts = {}) {
+function renderStaleItemsTable(container, staleData) {
   if (!staleData.total) {
     container.innerHTML = '<div style="font-size:.75rem;color:#22c55e;padding:.25rem">No stale items</div>';
     return;
   }
-  const data = staleData.byColumn;
-  const ROW_H = 22;
-  const W = opts.width || 500;
-  const PAD = { top: 8, right: 35, bottom: 6, left: 90 };
-  const chartW = W - PAD.left - PAD.right;
-  const H = PAD.top + data.length * ROW_H + PAD.bottom;
-  const maxCount = Math.max(1, ...data.map(d => d.count));
+  const rows = staleData.items.map(d => {
+    const daysColor = d.staleDaysActual >= 7 ? '#ef4444' : d.staleDaysActual >= 3 ? '#f59e0b' : '#94a3b8'
+    const statusLabel = d.blocked
+      ? '<span style="background:#f59e0b22;color:#f59e0b;font-size:.65rem;padding:1px 6px;border-radius:3px;font-weight:600">Blocked</span>'
+      : '<span style="background:#ef444422;color:#fca5a5;font-size:.65rem;padding:1px 6px;border-radius:3px;font-weight:600">Stale</span>'
+    return `<tr style="border-bottom:1px solid var(--border, #334155)">
+      <td style="padding:4px 6px;font-size:.75rem">${statusLabel}</td>
+      <td style="padding:4px 6px;font-size:.75rem"><a href="${escSvg(d.url)}" target="_blank" style="color:var(--accent, #6366f1);text-decoration:none">#${d.id}</a></td>
+      <td style="padding:4px 6px;font-size:.75rem;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escSvg(d.title)}</td>
+      <td style="padding:4px 6px;font-size:.75rem;color:var(--muted, #94a3b8)">${escSvg(d.assignee || 'Unassigned')}</td>
+      <td style="padding:4px 6px;font-size:.75rem;color:var(--muted, #94a3b8)">${escSvg(d.boardColumn)}</td>
+      <td style="padding:4px 6px;font-size:.75rem;font-weight:600;color:${daysColor}">${d.staleDaysActual}d</td>
+    </tr>`
+  }).join('')
 
-  let svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" style="width:100%;height:auto">`;
-  data.forEach((d, i) => {
-    const y = PAD.top + i * ROW_H;
-    const barW = Math.max(1, (d.count / maxCount) * chartW);
-    svg += `<text x="${PAD.left - 6}" y="${y + ROW_H / 2 + 3}" text-anchor="end" font-size="9" fill="currentColor">${d.col}</text>`;
-    svg += `<rect x="${PAD.left}" y="${y + 3}" width="${barW}" height="${ROW_H - 6}" rx="3" fill="#ef4444" opacity="0.6"/>`;
-    svg += `<text x="${PAD.left + barW + 4}" y="${y + ROW_H / 2 + 3}" font-size="9" font-weight="600" fill="#fca5a5">${d.count}</text>`;
-  });
-  svg += '</svg>';
-  container.innerHTML = svg;
+  container.innerHTML = `<div style="max-height:240px;overflow-y:auto;border-radius:6px;border:1px solid var(--border, #334155)">
+    <table style="width:100%;border-collapse:collapse">
+      <thead><tr style="position:sticky;top:0;background:var(--surface, #1e293b);border-bottom:1px solid var(--border, #334155)">
+        <th style="padding:4px 6px;font-size:.65rem;text-align:left;color:var(--muted, #94a3b8);font-weight:600">Status</th>
+        <th style="padding:4px 6px;font-size:.65rem;text-align:left;color:var(--muted, #94a3b8);font-weight:600">ID</th>
+        <th style="padding:4px 6px;font-size:.65rem;text-align:left;color:var(--muted, #94a3b8);font-weight:600">Title</th>
+        <th style="padding:4px 6px;font-size:.65rem;text-align:left;color:var(--muted, #94a3b8);font-weight:600">Assignee</th>
+        <th style="padding:4px 6px;font-size:.65rem;text-align:left;color:var(--muted, #94a3b8);font-weight:600">Column</th>
+        <th style="padding:4px 6px;font-size:.65rem;text-align:left;color:var(--muted, #94a3b8);font-weight:600">Days</th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+  </div>`
 }
 
 // ─── Simple metric card renderer ─────────────────────────────────────────────
@@ -1295,9 +1445,9 @@ function renderStaleItemsChart(container, staleData, opts = {}) {
 function renderMetricCard(container, metrics) {
   container.innerHTML = metrics.map(m =>
     `<div style="text-align:center;padding:.25rem .5rem">
-      <div style="font-size:1.4rem;font-weight:700;color:${m.color || 'var(--text)'};line-height:1">${m.value}</div>
-      <div style="font-size:.625rem;color:var(--muted);margin-top:.1rem">${m.label}</div>
-      ${m.sub ? `<div style="font-size:.625rem;color:var(--muted);margin-top:.05rem">${m.sub}</div>` : ''}
+      <div style="font-size:1.4rem;font-weight:700;color:${m.color || 'var(--text)'};line-height:1">${escSvg(m.value)}</div>
+      <div style="font-size:.625rem;color:var(--muted);margin-top:.1rem">${escSvg(m.label)}</div>
+      ${m.sub ? `<div style="font-size:.625rem;color:var(--muted);margin-top:.05rem">${escSvg(m.sub)}</div>` : ''}
     </div>`
   ).join('');
   container.style.cssText = 'display:flex;gap:.75rem;flex-wrap:wrap;justify-content:center';
@@ -1347,7 +1497,7 @@ function renderPriorityAgeChart(container, data, opts = {}) {
       if (!count) continue;
       const barH = (count / maxVal) * chartH;
       const y = PAD.top + chartH - yOffset - barH;
-      svg += `<rect x="${x}" y="${y}" width="${barW}" height="${barH}" rx="2" fill="${row.color}" opacity="0.85"><title>${row.label}: ${count}</title></rect>`;
+      svg += `<rect x="${x}" y="${y}" width="${barW}" height="${barH}" rx="2" fill="${row.color}" opacity="0.85"><title>${escSvg(row.label)}: ${count}</title></rect>`;
       yOffset += barH;
     }
     if (totals[bi] > 0) {
@@ -1359,7 +1509,7 @@ function renderPriorityAgeChart(container, data, opts = {}) {
   data.bands.forEach((label, i) => {
     const cx = PAD.left + i * groupW + groupW / 2;
     const cy = PAD.top + chartH + 8;
-    svg += `<text transform="rotate(-35,${cx},${cy})" x="${cx}" y="${cy}" text-anchor="end" font-size="9" fill="#64748b">${label}</text>`;
+    svg += `<text transform="rotate(-35,${cx},${cy})" x="${cx}" y="${cy}" text-anchor="end" font-size="9" fill="#64748b">${escSvg(label)}</text>`;
   });
 
   // Legend (right side)
@@ -1367,7 +1517,7 @@ function renderPriorityAgeChart(container, data, opts = {}) {
     const lx = PAD.left + chartW + 6;
     const ly = PAD.top + i * 16 + 10;
     svg += `<rect x="${lx}" y="${ly - 7}" width="9" height="9" rx="2" fill="${row.color}"/>`;
-    svg += `<text x="${lx + 13}" y="${ly}" font-size="9" fill="#64748b">${row.label}</text>`;
+    svg += `<text x="${lx + 13}" y="${ly}" font-size="9" fill="#64748b">${escSvg(row.label)}</text>`;
   });
 
   svg += '</svg>';
@@ -1376,6 +1526,13 @@ function renderPriorityAgeChart(container, data, opts = {}) {
 
 // ─── CFD chart: cumulative arrivals vs cumulative closures ────────────────────
 
+/**
+ * Render a cumulative flow diagram: arrival line, closed line, and shaded WIP band.
+ * Annotates the current WIP gap at the rightmost data point.
+ * @param {HTMLElement} container
+ * @param {{ label: string, arrived: number, closed: number }[]} data
+ * @param {{ width?: number, height?: number }} [opts]
+ */
 function renderCFDChart(container, data, opts = {}) {
   if (!data.length) {
     container.innerHTML = '<div style="font-size:.75rem;color:var(--muted, #64748b);padding:.5rem">No data available</div>';
@@ -1419,8 +1576,8 @@ function renderCFDChart(container, data, opts = {}) {
 
   // Dots with tooltips
   data.forEach((d, i) => {
-    svg += `<circle cx="${px(i)}" cy="${py(d.arrived)}" r="2.5" fill="#6366f1"><title>${d.label}: ${d.arrived} arrived</title></circle>`;
-    svg += `<circle cx="${px(i)}" cy="${py(d.closed)}" r="2.5" fill="#10b981"><title>${d.label}: ${d.closed} closed</title></circle>`;
+    svg += `<circle cx="${px(i)}" cy="${py(d.arrived)}" r="2.5" fill="#6366f1"><title>${escSvg(d.label)}: ${d.arrived} arrived</title></circle>`;
+    svg += `<circle cx="${px(i)}" cy="${py(d.closed)}" r="2.5" fill="#10b981"><title>${escSvg(d.label)}: ${d.closed} closed</title></circle>`;
   });
 
   // Current WIP annotation (last point gap)
@@ -1437,7 +1594,7 @@ function renderCFDChart(container, data, opts = {}) {
   data.forEach((d, i) => {
     const cx = px(i);
     const cy = PAD.top + chartH + 8;
-    svg += `<text transform="rotate(-45,${cx},${cy})" x="${cx}" y="${cy}" text-anchor="end" font-size="8" fill="#64748b">${d.label}</text>`;
+    svg += `<text transform="rotate(-45,${cx},${cy})" x="${cx}" y="${cy}" text-anchor="end" font-size="8" fill="#64748b">${escSvg(d.label)}</text>`;
   });
 
   // Legend
@@ -1457,13 +1614,13 @@ function renderCFDChart(container, data, opts = {}) {
 
 function getTheme() {
   return new Promise(resolve =>
-    chrome.storage.local.get('theme', r => resolve(r.theme || 'dark'))
+    chrome.storage.local.get(STORAGE_KEYS.theme, r => resolve(r[STORAGE_KEYS.theme] || 'dark'))
   )
 }
 
 function setTheme(theme) {
   return new Promise(resolve =>
-    chrome.storage.local.set({ theme }, resolve)
+    chrome.storage.local.set({ [STORAGE_KEYS.theme]: theme }, resolve)
   )
 }
 

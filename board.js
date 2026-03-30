@@ -85,6 +85,12 @@ function switchTab(tabId) {
 
 // ─── Overview panel ───────────────────────────────────────────────────────────
 
+/**
+ * Build or rebuild the Overview tab. Aggregates all pod items, computes KPI metrics
+ * (triage, WIP, aged, arrival rate, throughput), then conditionally renders each
+ * optional chart based on settings.overviewCharts toggle flags.
+ * @param {{ fetchedAt: string, pods: Object }} cachedData - Full cached pod data
+ */
 async function buildOverviewPanel(cachedData) {
   const container = $('panels-container');
   let panel = container.querySelector('[data-tab="overview"]');
@@ -499,21 +505,24 @@ async function buildOverviewPanel(cachedData) {
 
   // ── Optional: Stale Items ──
   if (oc.staleItems) {
-    const stale = calcStaleItems(allItems);
+    const staleDays = settings.staleDays || 2
+    const stale = calcStaleItems(allItems, staleDays);
     const div = document.createElement('div');
     div.className = 'metric-chart';
-    div.innerHTML = tip(`Stale Items (no change 14d+) — ${stale.total} total`, 'Active items with no field changes in 14+ days, grouped by board column. These may be blocked, forgotten, or need re-prioritisation. Check with the assignee.') + '<div class="stale-chart"></div>';
+    const blockedNote = stale.blocked > 0 ? ` · ${stale.blocked} blocked` : ''
+    div.innerHTML = tip(`Stale & Blocked Items — ${stale.total} total${blockedNote}`, `Active items with no field changes in ${staleDays}+ days, plus any blocked items (detected via column, swim lane, or Blocked tag) regardless of age. These need attention — check with the assignee.`) + '<div class="stale-chart"></div>';
     chartsGrid.appendChild(div);
-    renderStaleItemsChart(div.querySelector('.stale-chart'), stale, { width: 500 });
+    renderStaleItemsTable(div.querySelector('.stale-chart'), stale);
 
     for (const block of perPodContainer.querySelectorAll('[data-pod-id]')) {
       const pod = pods.find(p => p.id === block.dataset.podId);
       if (!pod) continue;
-      const podStale = calcStaleItems(pod.items || []);
+      const podStale = calcStaleItems(pod.items || [], staleDays);
+      const podBlockedNote = podStale.blocked > 0 ? ` · ${podStale.blocked} blocked` : ''
       const d = document.createElement('div');
-      d.innerHTML = `<div class="chart-subtitle">Stale Items (14d+) — ${podStale.total}</div><div class="pod-stale"></div>`;
+      d.innerHTML = `<div class="chart-subtitle">Stale & Blocked — ${podStale.total}${podBlockedNote}</div><div class="pod-stale"></div>`;
       block.querySelector('.pod-charts-grid').appendChild(d);
-      renderStaleItemsChart(d.querySelector('.pod-stale'), podStale, { width: 400 });
+      renderStaleItemsTable(d.querySelector('.pod-stale'), podStale);
     }
   }
 
@@ -882,7 +891,7 @@ function buildPodPanel(pod) {
     updateColCounts();
     // Persist filter state for this pod
     _boardFilters[pod.id] = { filter: v, search: query };
-    chrome.storage.local.set({ boardFilters: _boardFilters });
+    chrome.storage.local.set({ [STORAGE_KEYS.boardFilters]: _boardFilters });
   }
 
   // Wire search input
@@ -1037,7 +1046,14 @@ function buildPodPanel(pod) {
 
 async function renderAll(data) {
   if (!data?.pods) return;
-  const pods = Object.values(data.pods);
+  // Sort pods by the order defined in settings to keep tabs stable across refreshes
+  const settings = await getSettings()
+  const podOrder = (settings.pods || []).map(p => p.id)
+  const pods = Object.values(data.pods).sort((a, b) => {
+    const ai = podOrder.indexOf(a.id)
+    const bi = podOrder.indexOf(b.id)
+    return (ai === -1 ? Infinity : ai) - (bi === -1 ? Infinity : bi)
+  })
   if (!pods.length) { showBanner('No pods configured. Click ⚙ Settings to add pods.', 'err'); return; }
 
   // Remove loading skeleton on first render
@@ -1084,8 +1100,8 @@ chrome.runtime.onMessage.addListener(msg => {
 
 (async () => {
   // Load persisted filter state before first render so panels restore correctly
-  const stored = await new Promise(r => chrome.storage.local.get('boardFilters', r));
-  _boardFilters = stored.boardFilters || {};
+  const stored = await new Promise(r => chrome.storage.local.get(STORAGE_KEYS.boardFilters, r));
+  _boardFilters = stored[STORAGE_KEYS.boardFilters] || {};
 
   const settings = await getSettings();
   $('refresh-interval').textContent = settings.refreshInterval || 15;

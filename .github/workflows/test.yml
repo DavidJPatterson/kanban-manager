@@ -1,0 +1,24 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run unit tests
+        run: node test-node.js
+
+      - name: Syntax check
+        run: |
+          node -c shared.js
+          node -c board.js
+          node -c popup.js
+          node -c options.js
+          node -c background.js

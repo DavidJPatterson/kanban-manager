@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Kanban Manager — Unit Tests</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box }
+    body { font-family: system-ui, sans-serif; background: #0f172a; color: #e2e8f0; padding: 1.5rem }
+    h1 { font-size: 1.25rem; margin-bottom: 1rem }
+    .summary { font-size: .9rem; margin-bottom: 1rem; padding: .5rem .75rem; border-radius: 6px }
+    .summary.pass { background: #14532d; color: #86efac }
+    .summary.fail { background: #7f1d1d; color: #fca5a5 }
+    .group { margin-bottom: .75rem }
+    .group-name { font-size: .8rem; color: #94a3b8; font-weight: 600; margin-bottom: .25rem }
+    .result { font-size: .8rem; padding: .2rem .5rem; border-left: 3px solid transparent }
+    .result.pass { border-color: #22c55e; color: #86efac }
+    .result.fail { border-color: #ef4444; color: #fca5a5; background: #1e1e1e }
+  </style>
+</head>
+<body>
+  <h1>Kanban Manager — Unit Tests</h1>
+  <div id="summary"></div>
+  <div id="results"></div>
+
+  <script>
+    // Minimal chrome API mock so shared.js loads without errors
+    window.chrome = {
+      storage: { local: { get() {}, set() {}, remove() {} }, onChanged: { addListener() {} } },
+      runtime: { sendMessage() {}, onMessage: { addListener() {} }, onInstalled: { addListener() {} } },
+      alarms: { create() {}, clear() {}, onAlarm: { addListener() {} } }
+    }
+  </script>
+  <script src="shared.js"></script>
+  <script src="test.js"></script>
+</body>
+</html>

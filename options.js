@@ -52,8 +52,8 @@ function readPods() {
 
 document.addEventListener('DOMContentLoaded', () => {
   // Load saved settings first — this is the critical path
-  chrome.storage.local.get('settings', result => {
-    let s = result.settings || {};
+  chrome.storage.local.get(STORAGE_KEYS.settings, result => {
+    let s = result[STORAGE_KEYS.settings] || {};
     // Migrate old single-areaPath format
     if (s.areaPath && (!s.pods || s.pods.length === 0)) {
       s.pods = [{ id: 'pod-migrated', name: 'Pod 1', areaPath: s.areaPath }];
@@ -62,6 +62,7 @@ document.addEventListener('DOMContentLoaded', () => {
     $('project').value = s.project || '';
     $('pat').value = s.pat || '';
     $('refreshInterval').value = String(s.refreshInterval || 15);
+    $('staleDays').value = String(s.staleDays || 2);
     renderPodList(s.pods || []);
 
     // Overview chart toggles
@@ -120,6 +121,7 @@ function save() {
     project: $('project').value.trim(),
     pat: $('pat').value.trim(),
     refreshInterval: parseInt($('refreshInterval').value, 10),
+    staleDays: parseInt($('staleDays').value, 10) || 2,
     pods,
     overviewCharts: {
       cycleTimeInProgress: $('ct-in-progress').checked,
@@ -149,9 +151,9 @@ function save() {
     setStatus('Add at least one pod to track.', false); return;
   }
 
-  chrome.storage.local.set({ settings }, () => {
+  chrome.storage.local.set({ [STORAGE_KEYS.settings]: settings }, () => {
     setStatus(`Saved ${pods.length} pod${pods.length !== 1 ? 's' : ''}. Triggering refresh…`, true);
-    chrome.storage.local.remove(['cachedData', 'arrivedAtCache'], () => {
+    chrome.storage.local.remove([STORAGE_KEYS.cachedData, STORAGE_KEYS.arrivedAtCache], () => {
       chrome.runtime.sendMessage({ type: 'REFRESH' });
     });
   });
