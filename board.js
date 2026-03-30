@@ -85,6 +85,12 @@ function switchTab(tabId) {
 
 // ─── Overview panel ───────────────────────────────────────────────────────────
 
+/**
+ * Build or rebuild the Overview tab. Aggregates all pod items, computes KPI metrics
+ * (triage, WIP, aged, arrival rate, throughput), then conditionally renders each
+ * optional chart based on settings.overviewCharts toggle flags.
+ * @param {{ fetchedAt: string, pods: Object }} cachedData - Full cached pod data
+ */
 async function buildOverviewPanel(cachedData) {
   const container = $('panels-container');
   let panel = container.querySelector('[data-tab="overview"]');

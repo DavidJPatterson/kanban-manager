@@ -92,6 +92,15 @@ async function updateArrivedAtCache(entries) {
 
 const FETCH_TIMEOUT_MS = 15000
 
+/**
+ * Fetch from Azure DevOps REST API with Basic auth, 15s timeout, and retry.
+ * Retries up to 3 times with exponential backoff on network errors, 5xx, and 429.
+ * Throws on 4xx immediately (err.status is set for callers to inspect).
+ * @param {string} url - Full ADO API URL
+ * @param {{ pat: string }} settings - Must include a PAT for Basic auth
+ * @param {RequestInit} [options] - Additional fetch options (method, body, etc.)
+ * @returns {Promise<any>} Parsed JSON response
+ */
 async function adoFetch(url, settings, options = {}) {
   const MAX_RETRIES = 3;
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
@@ -216,11 +225,17 @@ async function getItemArrivedAt(itemId, podAreaPath, settings) {
   }
 }
 
-// Enriches items with arrivedAt dates, using a persistent cache to avoid re-fetching.
-// Cache is keyed by "podAreaPath:itemId" so moves between pods are handled correctly.
-// - Cached date string  → use it directly
-// - null (API failure)  → not cached, temporary changedDate heuristic used until next refresh
-// - 'native' sentinel   → item created in pod; cached as item.created (no false positives)
+/**
+ * Enrich items with arrivedAt dates via a persistent chrome.storage cache.
+ * Cache key: "podAreaPath:itemId" — handles moves between pods correctly.
+ * For uncached items, fetches update history from ADO (concurrency-limited to 10).
+ * Stale entries (item changed >1 day after cached arrival) are invalidated and re-fetched.
+ * Falls back to changedDate heuristic when API calls fail (not cached, retried next refresh).
+ * @param {Object[]} items - Work items with id, created, changedDate properties
+ * @param {string} podAreaPath - Area path of the pod (used as cache key prefix)
+ * @param {{ org: string, project: string, pat: string }} settings
+ * @returns {Promise<Object[]>} Items with arrivedAt property set
+ */
 async function enrichWithArrivedAt(items, podAreaPath, settings) {
   const cache = await getArrivedAtCache();
 
@@ -340,7 +355,14 @@ async function fetchWipLimits(pod, settings) {
   }
 }
 
-// Fetch data for a single pod area path
+/**
+ * Fetch all work items for a single pod. Runs two WIQL queries in parallel:
+ * one for active items under the pod's area path, one for items closed/resolved
+ * in the last 90 days. Results are merged, mapped, and enriched with arrival dates.
+ * @param {{ areaPath: string }} pod - Pod config with an ADO area path
+ * @param {Object} settings - Settings with org, project, pat
+ * @returns {Promise<Object[]>} Enriched work items
+ */
 async function fetchPodData(pod, settings) {
   const ap = pod.areaPath.replace(/'/g, "''");
   const ninetyDaysAgo = new Date();
@@ -373,8 +395,14 @@ async function fetchPodData(pod, settings) {
   return await enrichWithArrivedAt(items, pod.areaPath, settings);
 }
 
-// Fetch all configured pods in parallel
-// Pass previousData to skip pods that returned 404 last cycle (cleared on settings save)
+/**
+ * Fetch data for all configured pods in parallel.
+ * Pods that returned 404 last cycle are skipped (their cached error is reused).
+ * The 404 flag is cleared when settings are saved (options.js removes cachedData).
+ * @param {Object} settings - Settings with pods[], org, project, pat
+ * @param {Object} [previousData] - Previous cachedData; pods with error404 are skipped
+ * @returns {Promise<{ fetchedAt: string, pods: Object }>} Pod results keyed by pod.id
+ */
 async function fetchAllPods(settings, previousData) {
   const pods = settings.pods || [];
   const podResults = {};
@@ -851,6 +879,14 @@ async function getItemStartedAt(itemId, settings) {
   }
 }
 
+/**
+ * Enrich closed items with startedAt dates (when they first entered In Progress).
+ * Uses a persistent cache keyed by item ID. Uncached items trigger ADO update-history
+ * lookups (concurrency-limited to 10). Items with no activation are cached as '__none__'.
+ * @param {Object[]} items - Work items (only closed items are enriched)
+ * @param {Object} settings - Settings with org, project, pat
+ * @returns {Promise<Object[]>} Items with startedAt property set (or null)
+ */
 async function enrichWithStartedAt(items, settings) {
   const cache = await getStartedAtCache();
   const closedItems = items.filter(i => i.closed);
@@ -889,6 +925,13 @@ async function enrichWithStartedAt(items, settings) {
 
 // ─── Cycle Time Calculation ───────────────────────────────────────────────────
 
+/**
+ * Calculate cycle times for items closed in the last 90 days.
+ * Returns arrivalToClose (days from arrivedAt to closed) and inProgressToClose
+ * (days from startedAt to closed, null if startedAt is unknown).
+ * @param {Object[]} items - Work items with closed, arrivedAt, startedAt
+ * @returns {{ id: number, type: string, arrivalToClose: number|null, inProgressToClose: number|null, closedDate: Date }[]}
+ */
 function calcCycleTimes(items) {
   const ninetyDaysAgo = new Date();
   ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
@@ -935,6 +978,13 @@ function escSvg(s) {
 
 // ─── Simple SVG bar chart ──────────────────────────────────────────────────────
 
+/**
+ * Render a vertical bar chart as inline SVG. Supports single or stacked datasets,
+ * rotated x-axis labels, optional average line, and a colour legend.
+ * @param {HTMLElement} container - DOM element to inject SVG into (via innerHTML)
+ * @param {{ label: string, color: string, data: { label: string, count: number }[] }[]} datasets
+ * @param {{ width?: number, height?: number, stacked?: boolean, avgLine?: { value: number, label?: string, color?: string } }} [opts]
+ */
 function renderBarChart(container, datasets, opts = {}) {
   const W = opts.width || 600;
   const H = opts.height || 160;
@@ -1026,6 +1076,13 @@ function renderBarChart(container, datasets, opts = {}) {
 
 // ─── SVG scatter chart (cycle time) ───────────────────────────────────────────
 
+/**
+ * Render a scatter plot of cycle times as inline SVG. Each dot is a closed work item
+ * positioned by close date (x) and days (y), coloured by type. Shows p50/p85 lines.
+ * @param {HTMLElement} container
+ * @param {{ id: number, days: number, closedDate: Date, type: string, url?: string }[]} dataPoints
+ * @param {{ width?: number, height?: number }} [opts]
+ */
 function renderScatterChart(container, dataPoints, opts = {}) {
   const W = opts.width || 600;
   const H = opts.height || 200;
@@ -1104,6 +1161,13 @@ function renderScatterChart(container, dataPoints, opts = {}) {
 
 // ─── SVG line chart (burndown) ────────────────────────────────────────────────
 
+/**
+ * Render a multi-line chart as inline SVG. Supports dashed lines, area fill,
+ * dot tooltips, and rotated x-axis labels. Used for burndown and WIP trend.
+ * @param {HTMLElement} container
+ * @param {{ label: string, color: string, data: { label: string, value: number }[], dashed?: boolean, fill?: boolean }[]} datasets
+ * @param {{ width?: number, height?: number }} [opts]
+ */
 function renderLineChart(container, datasets, opts = {}) {
   const W = opts.width || 600;
   const H = opts.height || 200;
@@ -1237,6 +1301,13 @@ function renderThroughputPerPersonChart(container, data, opts = {}) {
 
 // ─── SVG horizontal bar chart (closed by person with history) ────────────────
 
+/**
+ * Render horizontal bar chart showing items closed per person this week,
+ * with average marker, count label, avg/wk column, and 8-week sparkline trend.
+ * @param {HTMLElement} container
+ * @param {{ name: string, thisWeek: number, avg: number, total: number, weekly: number[] }[]} data
+ * @param {{ width?: number }} [opts]
+ */
 function renderClosedByPersonChart(container, data, opts = {}) {
   if (!data.length) {
     container.innerHTML = '<div style="font-size:.75rem;color:var(--muted, #64748b);padding:.5rem">No items closed by assignees</div>';
@@ -1412,6 +1483,13 @@ function renderPriorityAgeChart(container, data, opts = {}) {
 
 // ─── CFD chart: cumulative arrivals vs cumulative closures ────────────────────
 
+/**
+ * Render a cumulative flow diagram: arrival line, closed line, and shaded WIP band.
+ * Annotates the current WIP gap at the rightmost data point.
+ * @param {HTMLElement} container
+ * @param {{ label: string, arrived: number, closed: number }[]} data
+ * @param {{ width?: number, height?: number }} [opts]
+ */
 function renderCFDChart(container, data, opts = {}) {
   if (!data.length) {
     container.innerHTML = '<div style="font-size:.75rem;color:var(--muted, #64748b);padding:.5rem">No data available</div>';
