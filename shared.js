@@ -679,12 +679,22 @@ function isBlocked(item) {
 function calcStaleItems(items, staleDays = 2) {
   const cutoff = Date.now() - staleDays * 86400000;
   const active = items.filter(i => i.state === 'Active');
+
+  // Stale: active items with no change beyond threshold
   const stale = active.filter(i => {
     const changed = i.changedDate ? new Date(i.changedDate).getTime() : 0;
     return changed < cutoff;
   });
+
+  // Blocked: all active blocked items, regardless of how long
+  const blockedNotStale = active.filter(i => {
+    const changed = i.changedDate ? new Date(i.changedDate).getTime() : 0;
+    return changed >= cutoff && isBlocked(i)
+  });
+
+  const combined = [...stale, ...blockedNotStale]
   let blockedCount = 0
-  const staleItems = stale.map(item => {
+  const result = combined.map(item => {
     const blocked = isBlocked(item)
     if (blocked) blockedCount++
     const staleDaysActual = Math.floor((Date.now() - new Date(item.changedDate).getTime()) / 86400000)
@@ -697,11 +707,15 @@ function calcStaleItems(items, staleDays = 2) {
       blocked,
       url: item.url
     }
-  }).sort((a, b) => b.staleDaysActual - a.staleDaysActual)
+  }).sort((a, b) => {
+    // Blocked first, then by stalest
+    if (a.blocked !== b.blocked) return a.blocked ? -1 : 1
+    return b.staleDaysActual - a.staleDaysActual
+  })
   return {
-    total: stale.length,
+    total: result.length,
     blocked: blockedCount,
-    items: staleItems
+    items: result
   };
 }
 
@@ -1397,13 +1411,14 @@ function renderStaleItemsTable(container, staleData) {
     return;
   }
   const rows = staleData.items.map(d => {
-    const blockedTag = d.blocked
-      ? ' <span style="background:#f59e0b22;color:#f59e0b;font-size:.6rem;padding:1px 5px;border-radius:3px;font-weight:600">BLOCKED</span>'
-      : ''
     const daysColor = d.staleDaysActual >= 7 ? '#ef4444' : d.staleDaysActual >= 3 ? '#f59e0b' : '#94a3b8'
+    const statusLabel = d.blocked
+      ? '<span style="background:#f59e0b22;color:#f59e0b;font-size:.65rem;padding:1px 6px;border-radius:3px;font-weight:600">Blocked</span>'
+      : '<span style="background:#ef444422;color:#fca5a5;font-size:.65rem;padding:1px 6px;border-radius:3px;font-weight:600">Stale</span>'
     return `<tr style="border-bottom:1px solid var(--border, #334155)">
+      <td style="padding:4px 6px;font-size:.75rem">${statusLabel}</td>
       <td style="padding:4px 6px;font-size:.75rem"><a href="${escSvg(d.url)}" target="_blank" style="color:var(--accent, #6366f1);text-decoration:none">#${d.id}</a></td>
-      <td style="padding:4px 6px;font-size:.75rem;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escSvg(d.title)}${blockedTag}</td>
+      <td style="padding:4px 6px;font-size:.75rem;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escSvg(d.title)}</td>
       <td style="padding:4px 6px;font-size:.75rem;color:var(--muted, #94a3b8)">${escSvg(d.assignee || 'Unassigned')}</td>
       <td style="padding:4px 6px;font-size:.75rem;color:var(--muted, #94a3b8)">${escSvg(d.boardColumn)}</td>
       <td style="padding:4px 6px;font-size:.75rem;font-weight:600;color:${daysColor}">${d.staleDaysActual}d</td>
@@ -1413,11 +1428,12 @@ function renderStaleItemsTable(container, staleData) {
   container.innerHTML = `<div style="max-height:240px;overflow-y:auto;border-radius:6px;border:1px solid var(--border, #334155)">
     <table style="width:100%;border-collapse:collapse">
       <thead><tr style="position:sticky;top:0;background:var(--surface, #1e293b);border-bottom:1px solid var(--border, #334155)">
+        <th style="padding:4px 6px;font-size:.65rem;text-align:left;color:var(--muted, #94a3b8);font-weight:600">Status</th>
         <th style="padding:4px 6px;font-size:.65rem;text-align:left;color:var(--muted, #94a3b8);font-weight:600">ID</th>
         <th style="padding:4px 6px;font-size:.65rem;text-align:left;color:var(--muted, #94a3b8);font-weight:600">Title</th>
         <th style="padding:4px 6px;font-size:.65rem;text-align:left;color:var(--muted, #94a3b8);font-weight:600">Assignee</th>
         <th style="padding:4px 6px;font-size:.65rem;text-align:left;color:var(--muted, #94a3b8);font-weight:600">Column</th>
-        <th style="padding:4px 6px;font-size:.65rem;text-align:left;color:var(--muted, #94a3b8);font-weight:600">Stale</th>
+        <th style="padding:4px 6px;font-size:.65rem;text-align:left;color:var(--muted, #94a3b8);font-weight:600">Days</th>
       </tr></thead>
       <tbody>${rows}</tbody>
     </table>

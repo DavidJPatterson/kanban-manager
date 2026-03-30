@@ -256,6 +256,16 @@ test('detects blocked items via tag', () => {
   assertEqual(result.blocked, 1)
 })
 
+test('blocked items always show regardless of staleDays', () => {
+  const items = [
+    makeItem({ changedDate: daysAgo(0), state: 'Active', boardLane: 'Blocked' })
+  ]
+  const result = calcStaleItems(items, 2)
+  assertEqual(result.total, 1, 'Blocked item should show even if changed today')
+  assertEqual(result.blocked, 1)
+  assert(result.items[0].blocked, 'Item should be marked blocked')
+})
+
 test('sorts by stalest first', () => {
   const items = [
     makeItem({ changedDate: daysAgo(3), state: 'Active' }),
