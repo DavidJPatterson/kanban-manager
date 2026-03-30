@@ -62,6 +62,7 @@ document.addEventListener('DOMContentLoaded', () => {
     $('project').value = s.project || '';
     $('pat').value = s.pat || '';
     $('refreshInterval').value = String(s.refreshInterval || 15);
+    $('staleDays').value = String(s.staleDays || 2);
     renderPodList(s.pods || []);
 
     // Overview chart toggles
@@ -120,6 +121,7 @@ function save() {
     project: $('project').value.trim(),
     pat: $('pat').value.trim(),
     refreshInterval: parseInt($('refreshInterval').value, 10),
+    staleDays: parseInt($('staleDays').value, 10) || 2,
     pods,
     overviewCharts: {
       cycleTimeInProgress: $('ct-in-progress').checked,

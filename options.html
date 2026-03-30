@@ -156,6 +156,19 @@
         </select>
       </div>
 
+      <div class="field">
+        <label>Stale item threshold (days)</label>
+        <select id="staleDays">
+          <option value="1">1 day</option>
+          <option value="2" selected>2 days</option>
+          <option value="3">3 days</option>
+          <option value="5">5 days</option>
+          <option value="7">7 days</option>
+          <option value="14">14 days</option>
+        </select>
+        <p class="hint">Active items with no changes beyond this threshold are flagged as stale.</p>
+      </div>
+
       <div class="section-sep"></div>
 
       <div class="section-title">

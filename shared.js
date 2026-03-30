@@ -4,6 +4,7 @@ const DEFAULT_SETTINGS = {
   org: '',
   project: '',
   refreshInterval: 15,
+  staleDays: 2,
   pat: '',
   pods: [],
   overviewCharts: {
@@ -157,6 +158,7 @@ async function getWorkItemsBatch(ids, settings) {
   const FIELDS = [
     'System.Id', 'System.Title', 'System.State', 'System.AssignedTo',
     'System.WorkItemType', 'System.CreatedDate', 'System.BoardColumn',
+    'System.BoardLane',
     'Microsoft.VSTS.Scheduling.StoryPoints', 'Microsoft.VSTS.Common.Priority',
     'System.Tags', 'Microsoft.VSTS.Common.ClosedDate',
     'Microsoft.VSTS.Common.ResolvedDate', 'System.ChangedDate',
@@ -456,6 +458,7 @@ function mapItem(raw, settings) {
     closed: f['Microsoft.VSTS.Common.ClosedDate'] || null,
     resolved: f['Microsoft.VSTS.Common.ResolvedDate'] || null,
     boardColumn: f['System.BoardColumn'] || null,
+    boardLane: f['System.BoardLane'] || null,
     sp: f['Microsoft.VSTS.Scheduling.StoryPoints'] || null,
     priority: f['Microsoft.VSTS.Common.Priority'] || 2,
     tags,
@@ -666,23 +669,39 @@ function calcFlowEfficiency(ctData) {
 
 // ─── Stale Items: active items with no state change in X days ────────────────
 
-function calcStaleItems(items, staleDays = 14) {
+function isBlocked(item) {
+  const col = (item.boardColumn || '').toLowerCase()
+  const lane = (item.boardLane || '').toLowerCase()
+  const hasTag = (item.tags || []).some(t => t.toLowerCase() === 'blocked')
+  return col.includes('blocked') || lane.includes('blocked') || hasTag
+}
+
+function calcStaleItems(items, staleDays = 2) {
   const cutoff = Date.now() - staleDays * 86400000;
-  const active = items.filter(i => !['Closed', 'Removed', 'Resolved'].includes(i.state));
+  const active = items.filter(i => i.state === 'Active');
   const stale = active.filter(i => {
     const changed = i.changedDate ? new Date(i.changedDate).getTime() : 0;
     return changed < cutoff;
   });
-  // Group by column
-  const byCol = {};
-  for (const item of stale) {
-    const col = item.boardColumn || item.state || 'Unknown';
-    if (!byCol[col]) byCol[col] = 0;
-    byCol[col]++;
-  }
+  let blockedCount = 0
+  const staleItems = stale.map(item => {
+    const blocked = isBlocked(item)
+    if (blocked) blockedCount++
+    const staleDaysActual = Math.floor((Date.now() - new Date(item.changedDate).getTime()) / 86400000)
+    return {
+      id: item.id,
+      title: item.title,
+      assignee: item.assignee,
+      boardColumn: item.boardColumn || 'Unknown',
+      staleDaysActual,
+      blocked,
+      url: item.url
+    }
+  }).sort((a, b) => b.staleDaysActual - a.staleDaysActual)
   return {
     total: stale.length,
-    byColumn: Object.entries(byCol).map(([col, count]) => ({ col, count })).sort((a, b) => b.count - a.count)
+    blocked: blockedCount,
+    items: staleItems
   };
 }
 
@@ -1372,29 +1391,37 @@ function renderClosedByPersonChart(container, data, opts = {}) {
 
 // ─── SVG horizontal bar chart (stale items by column) ────────────────────────
 
-function renderStaleItemsChart(container, staleData, opts = {}) {
+function renderStaleItemsTable(container, staleData) {
   if (!staleData.total) {
     container.innerHTML = '<div style="font-size:.75rem;color:#22c55e;padding:.25rem">No stale items</div>';
     return;
   }
-  const data = staleData.byColumn;
-  const ROW_H = 22;
-  const W = opts.width || 500;
-  const PAD = { top: 8, right: 35, bottom: 6, left: 90 };
-  const chartW = W - PAD.left - PAD.right;
-  const H = PAD.top + data.length * ROW_H + PAD.bottom;
-  const maxCount = Math.max(1, ...data.map(d => d.count));
+  const rows = staleData.items.map(d => {
+    const blockedTag = d.blocked
+      ? ' <span style="background:#f59e0b22;color:#f59e0b;font-size:.6rem;padding:1px 5px;border-radius:3px;font-weight:600">BLOCKED</span>'
+      : ''
+    const daysColor = d.staleDaysActual >= 7 ? '#ef4444' : d.staleDaysActual >= 3 ? '#f59e0b' : '#94a3b8'
+    return `<tr style="border-bottom:1px solid var(--border, #334155)">
+      <td style="padding:4px 6px;font-size:.75rem"><a href="${escSvg(d.url)}" target="_blank" style="color:var(--accent, #6366f1);text-decoration:none">#${d.id}</a></td>
+      <td style="padding:4px 6px;font-size:.75rem;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escSvg(d.title)}${blockedTag}</td>
+      <td style="padding:4px 6px;font-size:.75rem;color:var(--muted, #94a3b8)">${escSvg(d.assignee || 'Unassigned')}</td>
+      <td style="padding:4px 6px;font-size:.75rem;color:var(--muted, #94a3b8)">${escSvg(d.boardColumn)}</td>
+      <td style="padding:4px 6px;font-size:.75rem;font-weight:600;color:${daysColor}">${d.staleDaysActual}d</td>
+    </tr>`
+  }).join('')
 
-  let svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" style="width:100%;height:auto">`;
-  data.forEach((d, i) => {
-    const y = PAD.top + i * ROW_H;
-    const barW = Math.max(1, (d.count / maxCount) * chartW);
-    svg += `<text x="${PAD.left - 6}" y="${y + ROW_H / 2 + 3}" text-anchor="end" font-size="9" fill="currentColor">${escSvg(d.col)}</text>`;
-    svg += `<rect x="${PAD.left}" y="${y + 3}" width="${barW}" height="${ROW_H - 6}" rx="3" fill="#ef4444" opacity="0.6"/>`;
-    svg += `<text x="${PAD.left + barW + 4}" y="${y + ROW_H / 2 + 3}" font-size="9" font-weight="600" fill="#fca5a5">${d.count}</text>`;
-  });
-  svg += '</svg>';
-  container.innerHTML = svg;
+  container.innerHTML = `<div style="max-height:240px;overflow-y:auto;border-radius:6px;border:1px solid var(--border, #334155)">
+    <table style="width:100%;border-collapse:collapse">
+      <thead><tr style="position:sticky;top:0;background:var(--surface, #1e293b);border-bottom:1px solid var(--border, #334155)">
+        <th style="padding:4px 6px;font-size:.65rem;text-align:left;color:var(--muted, #94a3b8);font-weight:600">ID</th>
+        <th style="padding:4px 6px;font-size:.65rem;text-align:left;color:var(--muted, #94a3b8);font-weight:600">Title</th>
+        <th style="padding:4px 6px;font-size:.65rem;text-align:left;color:var(--muted, #94a3b8);font-weight:600">Assignee</th>
+        <th style="padding:4px 6px;font-size:.65rem;text-align:left;color:var(--muted, #94a3b8);font-weight:600">Column</th>
+        <th style="padding:4px 6px;font-size:.65rem;text-align:left;color:var(--muted, #94a3b8);font-weight:600">Stale</th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+  </div>`
 }
 
 // ─── Simple metric card renderer ─────────────────────────────────────────────

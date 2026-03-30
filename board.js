@@ -505,21 +505,24 @@ async function buildOverviewPanel(cachedData) {
 
   // ── Optional: Stale Items ──
   if (oc.staleItems) {
-    const stale = calcStaleItems(allItems);
+    const staleDays = settings.staleDays || 2
+    const stale = calcStaleItems(allItems, staleDays);
     const div = document.createElement('div');
     div.className = 'metric-chart';
-    div.innerHTML = tip(`Stale Items (no change 14d+) — ${stale.total} total`, 'Active items with no field changes in 14+ days, grouped by board column. These may be blocked, forgotten, or need re-prioritisation. Check with the assignee.') + '<div class="stale-chart"></div>';
+    const blockedNote = stale.blocked > 0 ? ` (${stale.blocked} blocked)` : ''
+    div.innerHTML = tip(`Stale Items (no change ${staleDays}d+) — ${stale.total} total${blockedNote}`, `Active items with no field changes in ${staleDays}+ days, grouped by board column. Blocked items (detected via column, swim lane, or tag) are flagged. These may need attention — check with the assignee.`) + '<div class="stale-chart"></div>';
     chartsGrid.appendChild(div);
-    renderStaleItemsChart(div.querySelector('.stale-chart'), stale, { width: 500 });
+    renderStaleItemsTable(div.querySelector('.stale-chart'), stale);
 
     for (const block of perPodContainer.querySelectorAll('[data-pod-id]')) {
       const pod = pods.find(p => p.id === block.dataset.podId);
       if (!pod) continue;
-      const podStale = calcStaleItems(pod.items || []);
+      const podStale = calcStaleItems(pod.items || [], staleDays);
+      const podBlockedNote = podStale.blocked > 0 ? ` (${podStale.blocked} blocked)` : ''
       const d = document.createElement('div');
-      d.innerHTML = `<div class="chart-subtitle">Stale Items (14d+) — ${podStale.total}</div><div class="pod-stale"></div>`;
+      d.innerHTML = `<div class="chart-subtitle">Stale Items (${staleDays}d+) — ${podStale.total}${podBlockedNote}</div><div class="pod-stale"></div>`;
       block.querySelector('.pod-charts-grid').appendChild(d);
-      renderStaleItemsChart(d.querySelector('.pod-stale'), podStale, { width: 400 });
+      renderStaleItemsTable(d.querySelector('.pod-stale'), podStale);
     }
   }
 

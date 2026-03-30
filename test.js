@@ -43,6 +43,7 @@ function makeItem(overrides = {}) {
     priority: 2,
     assignee: 'Test User',
     boardColumn: 'In Progress',
+    boardLane: null,
     created: daysAgo(30),
     changedDate: daysAgo(1),
     arrivedAt: daysAgo(20),
@@ -92,16 +93,20 @@ test('last bucket contains today', () => {
 group('calcWeeklyArrival')
 
 test('counts items arriving in each week', () => {
+  // Use bucket midpoints to guarantee items land inside buckets
+  const buckets = weekBuckets(8)
+  const midFirst = new Date((buckets[0].start.getTime() + buckets[0].end.getTime()) / 2)
   const items = [
-    makeItem({ arrivedAt: daysAgo(1) }),
-    makeItem({ arrivedAt: daysAgo(2) }),
-    makeItem({ arrivedAt: daysAgo(50) })
+    makeItem({ arrivedAt: daysAgo(0) }),
+    makeItem({ arrivedAt: daysAgo(0) }),
+    makeItem({ arrivedAt: midFirst.toISOString() })
   ]
   const result = calcWeeklyArrival(items, 8)
   assertEqual(result.length, 8)
-  // Last bucket should have the 2 recent items
-  const lastCount = result[result.length - 1].count
-  assert(lastCount >= 2, `Expected >=2 items in last week, got ${lastCount}`)
+  const total = result.reduce((s, w) => s + w.count, 0)
+  assertEqual(total, 3, 'All 3 items should be counted across buckets')
+  assertEqual(result[result.length - 1].count, 2, 'Last bucket should have 2 items')
+  assertEqual(result[0].count, 1, 'First bucket should have 1 item')
 })
 
 test('uses created date as fallback when arrivedAt is null', () => {
@@ -148,9 +153,9 @@ group('calcWeeklyThroughputPerPerson')
 
 test('calculates per-person rate', () => {
   const items = [
-    makeItem({ closed: daysAgo(1), assignee: 'Alice' }),
-    makeItem({ closed: daysAgo(1), assignee: 'Bob' }),
-    makeItem({ closed: daysAgo(2), assignee: 'Alice' })
+    makeItem({ closed: daysAgo(0), assignee: 'Alice' }),
+    makeItem({ closed: daysAgo(0), assignee: 'Bob' }),
+    makeItem({ closed: daysAgo(0), assignee: 'Alice' })
   ]
   const result = calcWeeklyThroughputPerPerson(items, 4)
   const last = result[result.length - 1]
@@ -161,8 +166,8 @@ test('calculates per-person rate', () => {
 
 test('excludes items without assignee', () => {
   const items = [
-    makeItem({ closed: daysAgo(1), assignee: null }),
-    makeItem({ closed: daysAgo(1), assignee: 'Alice' })
+    makeItem({ closed: daysAgo(0), assignee: null }),
+    makeItem({ closed: daysAgo(0), assignee: 'Alice' })
   ]
   const result = calcWeeklyThroughputPerPerson(items, 4)
   const last = result[result.length - 1]
@@ -197,22 +202,69 @@ test('returns zero counts for no active items', () => {
 
 group('calcStaleItems')
 
-test('identifies stale items by changedDate', () => {
+test('identifies stale Active items by changedDate', () => {
   const items = [
-    makeItem({ changedDate: daysAgo(30), state: 'Active', boardColumn: 'In Progress' }),
+    makeItem({ changedDate: daysAgo(5), state: 'Active', boardColumn: 'In Progress' }),
     makeItem({ changedDate: daysAgo(1), state: 'Active' }),
     makeItem({ changedDate: daysAgo(20), state: 'Closed' }) // closed — excluded
   ]
-  const result = calcStaleItems(items, 14)
+  const result = calcStaleItems(items, 2)
   assertEqual(result.total, 1)
-  assertEqual(result.byColumn[0].col, 'In Progress')
+  assertEqual(result.items[0].boardColumn, 'In Progress')
+  assert(result.items[0].staleDaysActual >= 4 && result.items[0].staleDaysActual <= 5, `Expected ~5 days, got ${result.items[0].staleDaysActual}`)
+})
+
+test('excludes non-Active states', () => {
+  const items = [
+    makeItem({ changedDate: daysAgo(10), state: 'New' }),
+    makeItem({ changedDate: daysAgo(10), state: 'Ready' }),
+    makeItem({ changedDate: daysAgo(10), state: 'Active' })
+  ]
+  const result = calcStaleItems(items, 2)
+  assertEqual(result.total, 1, 'Only Active items should be stale')
 })
 
 test('returns zero for no stale items', () => {
   const items = [makeItem({ changedDate: daysAgo(1), state: 'Active' })]
-  const result = calcStaleItems(items, 14)
+  const result = calcStaleItems(items, 2)
   assertEqual(result.total, 0)
-  assertEqual(result.byColumn.length, 0)
+  assertEqual(result.items.length, 0)
+})
+
+test('detects blocked items via board column', () => {
+  const items = [
+    makeItem({ changedDate: daysAgo(5), state: 'Active', boardColumn: 'Blocked' })
+  ]
+  const result = calcStaleItems(items, 2)
+  assertEqual(result.blocked, 1)
+  assert(result.items[0].blocked, 'Item should be marked blocked')
+})
+
+test('detects blocked items via swim lane', () => {
+  const items = [
+    makeItem({ changedDate: daysAgo(5), state: 'Active', boardColumn: 'In Progress', boardLane: 'Blocked' })
+  ]
+  const result = calcStaleItems(items, 2)
+  assertEqual(result.blocked, 1)
+})
+
+test('detects blocked items via tag', () => {
+  const items = [
+    makeItem({ changedDate: daysAgo(5), state: 'Active', tags: ['Blocked', 'Important'] })
+  ]
+  const result = calcStaleItems(items, 2)
+  assertEqual(result.blocked, 1)
+})
+
+test('sorts by stalest first', () => {
+  const items = [
+    makeItem({ changedDate: daysAgo(3), state: 'Active' }),
+    makeItem({ changedDate: daysAgo(10), state: 'Active' }),
+    makeItem({ changedDate: daysAgo(5), state: 'Active' })
+  ]
+  const result = calcStaleItems(items, 2)
+  assert(result.items[0].staleDaysActual >= result.items[1].staleDaysActual, 'Should be sorted stalest first')
+  assert(result.items[1].staleDaysActual >= result.items[2].staleDaysActual, 'Should be sorted stalest first')
 })
 
 // ─── calcBugRatioTrend ────────────────────────────────────────────────────────
@@ -221,9 +273,9 @@ group('calcBugRatioTrend')
 
 test('calculates bug percentage per week', () => {
   const items = [
-    makeItem({ closed: daysAgo(1), type: 'Bug' }),
-    makeItem({ closed: daysAgo(1), type: 'User Story' }),
-    makeItem({ closed: daysAgo(2), type: 'Bug' })
+    makeItem({ closed: daysAgo(0), type: 'Bug' }),
+    makeItem({ closed: daysAgo(0), type: 'User Story' }),
+    makeItem({ closed: daysAgo(0), type: 'Bug' })
   ]
   const result = calcBugRatioTrend(items, 4)
   const last = result[result.length - 1]
@@ -247,17 +299,18 @@ test('returns null for fewer than 2 weeks', () => {
 })
 
 test('stable throughput yields low CV', () => {
-  // Create items with exactly 2 per week for 4 weeks
+  // Place 2 items in each of the last 4 week buckets using bucket midpoints
+  const buckets = weekBuckets(4)
   const items = []
-  for (let w = 0; w < 4; w++) {
-    items.push(makeItem({ closed: daysAgo(w * 7 + 1) }))
-    items.push(makeItem({ closed: daysAgo(w * 7 + 2) }))
+  for (const b of buckets) {
+    const mid = new Date((b.start.getTime() + b.end.getTime()) / 2)
+    items.push(makeItem({ closed: mid.toISOString() }))
+    items.push(makeItem({ closed: mid.toISOString() }))
   }
   const result = calcThroughputPredictability(items, 4)
-  if (result) {
-    assert(result.cv <= 0.5, `CV should be low for stable throughput, got ${result.cv}`)
-    assert(result.rating === 'Stable' || result.rating === 'Moderate', `Expected Stable/Moderate, got ${result.rating}`)
-  }
+  assert(result !== null, 'Should return a result')
+  assertEqual(result.cv, 0, `CV should be 0 for perfectly stable throughput, got ${result.cv}`)
+  assertEqual(result.rating, 'Stable')
 })
 
 // ─── calcFlowEfficiency ───────────────────────────────────────────────────────
