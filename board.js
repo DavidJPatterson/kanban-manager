@@ -90,8 +90,9 @@ function switchTab(tabId) {
  * (triage, WIP, aged, arrival rate, throughput), then conditionally renders each
  * optional chart based on settings.overviewCharts toggle flags.
  * @param {{ fetchedAt: string, pods: Object }} cachedData - Full cached pod data
+ * @param {Array} sortedPods - Pods pre-sorted by settings order
  */
-async function buildOverviewPanel(cachedData) {
+async function buildOverviewPanel(cachedData, sortedPods) {
   const container = $('panels-container');
   let panel = container.querySelector('[data-tab="overview"]');
   if (!panel) {
@@ -101,7 +102,7 @@ async function buildOverviewPanel(cachedData) {
     container.appendChild(panel);
   }
 
-  const pods = Object.values(cachedData.pods);
+  const pods = sortedPods;
   const allItems = getAllItems(cachedData);
   const arrival = calcWeeklyArrival(allItems, 8);
   const throughput = calcWeeklyThroughput(allItems, 8);
@@ -1061,7 +1062,7 @@ async function renderAll(data) {
   if (skel) skel.remove()
 
   buildTabs(pods);
-  await buildOverviewPanel(data);
+  await buildOverviewPanel(data, pods);
   pods.forEach(pod => buildPodPanel(pod));
 
   // Restore previously active tab
