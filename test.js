@@ -574,27 +574,30 @@ test('returns a color from the palette', () => {
   const failed = _results.filter(r => !r.pass).length
   const total = _results.length
 
-  const summaryEl = document.getElementById('summary')
-  summaryEl.className = `summary ${failed > 0 ? 'fail' : 'pass'}`
-  summaryEl.textContent = `${passed}/${total} passed` + (failed > 0 ? ` — ${failed} FAILED` : ' ✓')
+  // Browser rendering (skipped in Node.js)
+  if (typeof window !== 'undefined' && document.getElementById('summary')) {
+    const summaryEl = document.getElementById('summary')
+    summaryEl.className = `summary ${failed > 0 ? 'fail' : 'pass'}`
+    summaryEl.textContent = `${passed}/${total} passed` + (failed > 0 ? ` — ${failed} FAILED` : ' ✓')
 
-  const resultsEl = document.getElementById('results')
-  let currentGroup = ''
-  for (const r of _results) {
-    if (r.group !== currentGroup) {
-      currentGroup = r.group
-      const groupEl = document.createElement('div')
-      groupEl.className = 'group-name'
-      groupEl.textContent = currentGroup
-      resultsEl.appendChild(groupEl)
+    const resultsEl = document.getElementById('results')
+    let currentGroup = ''
+    for (const r of _results) {
+      if (r.group !== currentGroup) {
+        currentGroup = r.group
+        const groupEl = document.createElement('div')
+        groupEl.className = 'group-name'
+        groupEl.textContent = currentGroup
+        resultsEl.appendChild(groupEl)
+      }
+      const el = document.createElement('div')
+      el.className = `result ${r.pass ? 'pass' : 'fail'}`
+      el.textContent = r.pass ? `✓ ${r.name}` : `✗ ${r.name} — ${r.error}`
+      resultsEl.appendChild(el)
     }
-    const el = document.createElement('div')
-    el.className = `result ${r.pass ? 'pass' : 'fail'}`
-    el.textContent = r.pass ? `✓ ${r.name}` : `✗ ${r.name} — ${r.error}`
-    resultsEl.appendChild(el)
   }
 
-  // Also log to console for CI or headless use
+  // Console output (works in both browser and Node.js)
   console.log(`\n${passed}/${total} passed${failed > 0 ? ` — ${failed} FAILED` : ''}`)
   for (const r of _results.filter(r => !r.pass)) {
     console.error(`  FAIL: ${r.group} > ${r.name} — ${r.error}`)
