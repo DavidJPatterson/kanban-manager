@@ -4,6 +4,14 @@ All notable changes to Kanban Manager are documented here.
 
 ---
 
+## [1.3.0] — 2026-03-30
+
+### Fixed
+
+- **Overview pod ordering** — Pod summary cards and Flow by Pod charts now respect settings order. Previously only tabs were sorted; the overview panel independently derived pods from the raw cache object in arbitrary order.
+
+---
+
 ## [1.2.0] — 2026-03-30
 
 ### Added
