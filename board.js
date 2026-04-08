@@ -3,6 +3,7 @@
 document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('refresh-btn').addEventListener('click', triggerRefresh);
   document.getElementById('settings-btn').addEventListener('click', () => chrome.runtime.openOptionsPage());
+  document.getElementById('team-btn').addEventListener('click', () => chrome.tabs.update({ url: 'team.html' }));
 
   // Theme toggle
   const themeBtn = document.getElementById('theme-btn')
@@ -100,8 +101,9 @@ function switchTab(tabId) {
  * (triage, WIP, aged, arrival rate, throughput), then conditionally renders each
  * optional chart based on settings.overviewCharts toggle flags.
  * @param {{ fetchedAt: string, pods: Object }} cachedData - Full cached pod data
+ * @param {Array} sortedPods - Pods pre-sorted by settings order
  */
-async function buildOverviewPanel(cachedData) {
+async function buildOverviewPanel(cachedData, sortedPods) {
   const container = $('panels-container');
   let panel = container.querySelector('[data-tab="overview"]');
   if (!panel) {
@@ -111,7 +113,7 @@ async function buildOverviewPanel(cachedData) {
     container.appendChild(panel);
   }
 
-  const pods = Object.values(cachedData.pods);
+  const pods = sortedPods;
   const allItems = getAllItems(cachedData);
   const arrival = calcWeeklyArrival(allItems, 8);
   const throughput = calcWeeklyThroughput(allItems, 8);
@@ -712,7 +714,7 @@ async function buildOverviewPanel(cachedData) {
 
 // ─── Executive Summary panel ─────────────────────────────────────────────────
 
-async function buildExecutiveSummaryPanel(cachedData, settings) {
+async function buildExecutiveSummaryPanel(cachedData, settings, sortedPods) {
   const container = $('panels-container')
   let panel = container.querySelector('[data-tab="exec-summary"]')
   if (!panel) {
@@ -722,32 +724,109 @@ async function buildExecutiveSummaryPanel(cachedData, settings) {
     container.appendChild(panel)
   }
 
-  const pods = Object.values(cachedData.pods)
+  const pods = sortedPods || Object.values(cachedData.pods)
   const allItems = getAllItems(cachedData)
   const staleDays = settings.staleDays || 2
   const podSettings = settings.pods || []
   const notes = await getExecSummaryNotes()
+  const holidays = await getTeamHolidays()
 
-  // Week label
+  // Week label — show last week's date range (not current incomplete week)
   const now = new Date()
-  const weekStart = new Date(now)
-  weekStart.setDate(now.getDate() - now.getDay() + 1) // Monday
-  const weekLabel = weekStart.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })
+  const thisMonday = new Date(now)
+  thisMonday.setDate(now.getDate() - ((now.getDay() + 6) % 7))
+  thisMonday.setHours(0, 0, 0, 0)
+  const lastMonday = new Date(thisMonday)
+  lastMonday.setDate(thisMonday.getDate() - 7)
+  const lastSunday = new Date(lastMonday)
+  lastSunday.setDate(lastMonday.getDate() + 6)
+  const fmtOpts = { day: 'numeric', month: 'short' }
+  const weekLabel = `${lastMonday.toLocaleDateString('en-GB', fmtOpts)} – ${lastSunday.toLocaleDateString('en-GB', { ...fmtOpts, year: 'numeric' })}`
 
-  // ── Aggregate stats ──
-  const totalArrival = arrivalStats(allItems)
-  const totalTp = calcWeeklyThroughput(allItems, 4)
-  const totalTpLast = totalTp[totalTp.length - 1]?.count || 0
-  const totalTpPrev = totalTp[totalTp.length - 2]?.count || 0
+  // ── Aggregate stats (last week vs week before, with averages over all data) ──
+  const totalArrivalWeekly = calcWeeklyArrival(allItems, 8)
+  const totalArrLast = totalArrivalWeekly[totalArrivalWeekly.length - 2]?.count || 0
+  const totalArrPrev = totalArrivalWeekly[totalArrivalWeekly.length - 3]?.count || 0
+  const totalArrThisWeek = totalArrivalWeekly[totalArrivalWeekly.length - 1]?.count || 0
+  const totalArrAvg = totalArrivalWeekly.length > 1
+    ? +(totalArrivalWeekly.slice(0, -1).reduce((s, w) => s + w.count, 0) / (totalArrivalWeekly.length - 1)).toFixed(1) : 0
+
+  const totalTp = calcWeeklyThroughput(allItems, 8)
+  const totalTpLast = totalTp[totalTp.length - 2]?.count || 0
+  const totalTpPrev = totalTp[totalTp.length - 3]?.count || 0
+  const totalTpThisWeek = totalTp[totalTp.length - 1]?.count || 0
+  const totalTpAvg = totalTp.length > 1
+    ? +(totalTp.slice(0, -1).reduce((s, w) => s + w.count, 0) / (totalTp.length - 1)).toFixed(1) : 0
+
+  const totalTpPP = calcWeeklyThroughputPerPerson(allItems, 8)
+  const totalTpPPLast = totalTpPP[totalTpPP.length - 2]?.perPerson || 0
+  const totalTpPPPrev = totalTpPP[totalTpPP.length - 3]?.perPerson || 0
+  const totalTpPPAvg = totalTpPP.length > 1
+    ? +(totalTpPP.slice(0, -1).reduce((s, w) => s + w.perPerson, 0) / (totalTpPP.length - 1)).toFixed(1) : 0
   const totalActive = allItems.filter(i => !['Closed', 'Removed', 'Resolved'].includes(i.state))
-  const totalWip = totalActive.filter(i => {
+  const totalWipItems = totalActive.filter(i => {
     const col = (i.boardColumn || i.state || '').toLowerCase()
     return col.includes('progress') || col.includes('active') || col.includes('review')
-  }).length
+  })
+  const totalWip = totalWipItems.length
+  const totalWipBugs = totalWipItems.filter(i => i.type === 'Bug').length
+  const totalWipStories = totalWipItems.filter(i => i.type === 'User Story').length
   const totalStale = calcStaleItems(allItems, staleDays)
 
-  // ── Auto-insights ──
-  const insights = calcExecInsights(cachedData, staleDays)
+  // Type splits for arrival & throughput (last week bucket)
+  const buckets = weekBuckets(8)
+  const lastWeekBucket = buckets[buckets.length - 2]
+  const arrSplit = lastWeekBucket ? (() => {
+    let bugs = 0, stories = 0
+    for (const i of allItems) {
+      const d = new Date(i.arrivedAt || i.created)
+      if (d >= lastWeekBucket.start && d <= lastWeekBucket.end) {
+        if (i.type === 'Bug') bugs++
+        else if (i.type === 'User Story') stories++
+      }
+    }
+    return { bugs, stories }
+  })() : { bugs: 0, stories: 0 }
+  const tpDone = allItems.filter(i => (i.closed || i.resolved) && i.type !== 'Spike')
+  const tpSplit = lastWeekBucket ? (() => {
+    let bugs = 0, stories = 0
+    for (const i of tpDone) {
+      const d = new Date(i.closed || i.resolved)
+      if (d >= lastWeekBucket.start && d <= lastWeekBucket.end) {
+        if (i.type === 'Bug') bugs++
+        else if (i.type === 'User Story') stories++
+      }
+    }
+    return { bugs, stories }
+  })() : { bugs: 0, stories: 0 }
+
+  // This-week type splits
+  const thisWeekBucket = buckets[buckets.length - 1]
+  const arrSplitThisWk = thisWeekBucket ? (() => {
+    let bugs = 0, stories = 0
+    for (const i of allItems) {
+      const d = new Date(i.arrivedAt || i.created)
+      if (d >= thisWeekBucket.start && d <= thisWeekBucket.end) {
+        if (i.type === 'Bug') bugs++
+        else if (i.type === 'User Story') stories++
+      }
+    }
+    return { bugs, stories }
+  })() : { bugs: 0, stories: 0 }
+  const tpSplitThisWk = thisWeekBucket ? (() => {
+    let bugs = 0, stories = 0
+    for (const i of tpDone) {
+      const d = new Date(i.closed || i.resolved)
+      if (d >= thisWeekBucket.start && d <= thisWeekBucket.end) {
+        if (i.type === 'Bug') bugs++
+        else if (i.type === 'User Story') stories++
+      }
+    }
+    return { bugs, stories }
+  })() : { bugs: 0, stories: 0 }
+
+  // ── Auto-insights (per-pod + aggregate) ──
+  const { byPod: podInsightsMap, aggregate: aggInsights } = calcExecInsights(cachedData, staleDays, holidays)
 
   // ── Build HTML ──
   let html = ''
@@ -756,60 +835,73 @@ async function buildExecutiveSummaryPanel(cachedData, settings) {
   html += `
     <div class="exec-header">
       <div class="exec-title">Executive Summary</div>
-      <div class="exec-date">Week of ${escHtml(weekLabel)}</div>
+      <div class="exec-date">${escHtml(weekLabel)}</div>
     </div>
   `
 
-  // Auto-generated insights
-  if (insights.length) {
-    html += '<div class="exec-insights">'
-    for (const insight of insights) {
-      const icon = insight.type === 'positive' ? '✅' : insight.type === 'warning' ? '⚠️' : '🔴'
-      html += `<div class="exec-insight ${insight.type}"><span class="exec-insight-icon">${icon}</span>${escHtml(insight.text)}</div>`
-    }
-    html += '</div>'
-  }
-
-  // Aggregate KPIs
+  // Aggregate KPIs (last week vs week before)
   function deltaHtml(curr, prev, invertColor) {
-    const diff = curr - prev
+    const diff = +(curr - prev).toFixed(1)
     if (diff === 0) return '<div class="exec-agg-delta exec-delta-flat">→ same</div>'
     const arrow = diff > 0 ? '↑' : '↓'
+    const absDiff = Math.abs(diff) % 1 === 0 ? Math.abs(diff) : Math.abs(diff).toFixed(1)
     const pct = prev > 0 ? ` (${Math.round(Math.abs(diff / prev) * 100)}%)` : ''
-    // For arrival, up is bad. For throughput, up is good. invertColor flips it.
     const cls = invertColor
       ? (diff > 0 ? 'exec-delta-down' : 'exec-delta-up')
       : (diff > 0 ? 'exec-delta-up' : 'exec-delta-down')
-    return `<div class="exec-agg-delta ${cls}">${arrow}${Math.abs(diff)}${pct} vs prev wk</div>`
+    return `<div class="exec-agg-delta ${cls}">${arrow}${absDiff}${pct} vs prev wk</div>`
   }
 
   html += `
     <div class="exec-aggregate">
-      <div class="exec-aggregate-title">All Pods — This Week vs Last</div>
+      <div class="exec-aggregate-title">All Pods — Last Week vs Week Before</div>
       <div class="exec-agg-grid">
         <div class="exec-agg-card">
           <div class="exec-agg-label">Arrival</div>
-          <div class="exec-agg-val kv-arrival">${totalArrival.last7}</div>
-          ${deltaHtml(totalArrival.last7, totalArrival.prev7, false)}
+          <div class="exec-agg-val kv-arrival">${totalArrLast}</div>
+          <div class="exec-agg-split">${arrSplit.bugs} bug · ${arrSplit.stories} story</div>
+          ${deltaHtml(totalArrLast, totalArrPrev, false)}
+          <div class="exec-agg-live">Avg: ${totalArrAvg}/wk · This week: ${totalArrThisWeek} (${arrSplitThisWk.bugs}b ${arrSplitThisWk.stories}s)</div>
         </div>
         <div class="exec-agg-card">
           <div class="exec-agg-label">Throughput</div>
           <div class="exec-agg-val kv-throughput">${totalTpLast}</div>
+          <div class="exec-agg-split">${tpSplit.bugs} bug · ${tpSplit.stories} story</div>
           ${deltaHtml(totalTpLast, totalTpPrev, true)}
+          <div class="exec-agg-live">Avg: ${totalTpAvg}/wk · This week: ${totalTpThisWeek} (${tpSplitThisWk.bugs}b ${tpSplitThisWk.stories}s)</div>
+        </div>
+        <div class="exec-agg-card">
+          <div class="exec-agg-label">Throughput / Person</div>
+          <div class="exec-agg-val kv-throughput">${totalTpPPLast}</div>
+          ${deltaHtml(totalTpPPLast, totalTpPPPrev, true)}
+          <div class="exec-agg-live">Avg: ${totalTpPPAvg}/wk</div>
         </div>
         <div class="exec-agg-card">
           <div class="exec-agg-label">Active WIP</div>
           <div class="exec-agg-val kv-wip">${totalWip}</div>
-          <div class="exec-agg-delta exec-delta-flat">${totalActive.length} total active</div>
+          <div class="exec-agg-split">${totalWipBugs} bug · ${totalWipStories} story</div>
+          <div class="exec-agg-live">${totalActive.length - totalWip} in backlog (${totalActive.filter(i => i.type === 'Bug').length - totalWipBugs}b ${totalActive.filter(i => i.type === 'User Story').length - totalWipStories}s)</div>
         </div>
         <div class="exec-agg-card">
           <div class="exec-agg-label">Stale / Blocked</div>
           <div class="exec-agg-val kv-aged">${totalStale.total}</div>
-          <div class="exec-agg-delta exec-delta-flat">${totalStale.blocked} blocked</div>
+          <div class="exec-agg-links">${totalStale.items.map(i =>
+            `<a href="${i.url}" target="_blank" class="exec-stale-link ${i.type === 'Bug' ? 'type-bug' : 'type-story'}" title="${escHtml(i.title)}">#${i.id}</a>`
+          ).join(' ')}</div>
         </div>
       </div>
     </div>
   `
+
+  // Aggregate insights (if any)
+  if (aggInsights.length) {
+    html += '<div class="exec-insights">'
+    for (const insight of aggInsights) {
+      const icon = insight.type === 'positive' ? '✅' : insight.type === 'warning' ? '⚠️' : insight.type === 'info' ? 'ℹ️' : '🔴'
+      html += `<div class="exec-insight ${insight.type}"><span class="exec-insight-icon">${icon}</span>${escHtml(insight.text)}</div>`
+    }
+    html += '</div>'
+  }
 
   // Per-pod cards
   html += '<div class="exec-pods">'
@@ -817,61 +909,103 @@ async function buildExecutiveSummaryPanel(cachedData, settings) {
   for (const pod of pods) {
     const pItems = pod.items || []
     const pActive = pItems.filter(i => !['Closed', 'Removed', 'Resolved'].includes(i.state))
-    const pArrival = arrivalStats(pItems)
-    const pTp = calcWeeklyThroughput(pItems, 4)
-    const pTpLast = pTp[pTp.length - 1]?.count || 0
-    const pTpPrev = pTp[pTp.length - 2]?.count || 0
+
+    // Shifted windows: last week vs week before (8 weeks for averages)
+    const pArrWeekly = calcWeeklyArrival(pItems, 8)
+    const pArrLast = pArrWeekly[pArrWeekly.length - 2]?.count || 0
+    const pArrPrev = pArrWeekly[pArrWeekly.length - 3]?.count || 0
+    const pArrAvg = pArrWeekly.length > 1
+      ? +(pArrWeekly.slice(0, -1).reduce((s, w) => s + w.count, 0) / (pArrWeekly.length - 1)).toFixed(1) : 0
+
+    const pTp = calcWeeklyThroughput(pItems, 8)
+    const pTpLast = pTp[pTp.length - 2]?.count || 0
+    const pTpPrev = pTp[pTp.length - 3]?.count || 0
+    const pTpAvg = pTp.length > 1
+      ? +(pTp.slice(0, -1).reduce((s, w) => s + w.count, 0) / (pTp.length - 1)).toFixed(1) : 0
+
+    const pTpPP = calcWeeklyThroughputPerPerson(pItems, 8)
+    const pTpPPLast = pTpPP[pTpPP.length - 2]?.perPerson || 0
+    const pTpPPPrev = pTpPP[pTpPP.length - 3]?.perPerson || 0
+    const pTpPPAvg = pTpPP.length > 1
+      ? +(pTpPP.slice(0, -1).reduce((s, w) => s + w.perPerson, 0) / (pTpPP.length - 1)).toFixed(1) : 0
+
     const pCols = columnCounts(pActive)
     const pTriage = colCount(pCols, 'Triage', 'Intake')
     const pTriagePrev = (() => {
-      // Estimate prev week triage from arrival delta — not exact but directional
-      const prevTriage = pTriage + (pArrival.prev7 - pArrival.last7)
+      const prevTriage = pTriage + (pArrPrev - pArrLast)
       return Math.max(0, prevTriage)
     })()
-    const pWip = colCount(pCols, 'In Progress', 'Active') + colCount(pCols, 'Code Review', 'Review')
-    const pAged = pActive.filter(x => ageDays(x) >= 90).length
-    const pStale = calcStaleItems(pItems, staleDays)
+    const pAged = pActive.filter(x => ageDays(x) >= 7).length
+
+    // Work item breakdown
+    const pBugs = pActive.filter(x => x.type === 'Bug').length
+    const pStories = pActive.filter(x => x.type === 'User Story').length
+    const pOther = pActive.length - pBugs - pStories
+    const pP1 = pActive.filter(x => x.priority === 1).length
+    const pP2 = pActive.filter(x => x.priority === 2).length
+    const pP3 = pActive.filter(x => x.priority === 3).length
+    const pP4 = pActive.filter(x => x.priority >= 4).length
     const health = calcPodHealthStatus(pod, staleDays)
     const color = podColor(pod.id)
     const podSetting = podSettings.find(p => p.id === pod.id) || {}
     const desc = podSetting.description || ''
     const podNote = notes[pod.id] || ''
     const pred = calcThroughputPredictability(pItems, 8)
+    const pInsights = podInsightsMap[pod.id] || []
 
-    // Week-over-week comparison rows
+    // Week-over-week comparison rows (last week vs week before + avg)
     const wowRows = [
-      { metric: 'Arrival', curr: pArrival.last7, prev: pArrival.prev7, upIsBad: true },
-      { metric: 'Throughput', curr: pTpLast, prev: pTpPrev, upIsBad: false },
-      { metric: 'Triage', curr: pTriage, prev: pTriagePrev, upIsBad: true },
-      { metric: 'Aged >90d', curr: pAged, prev: null, upIsBad: true },
+      { metric: 'Arrival', curr: pArrLast, prev: pArrPrev, avg: pArrAvg, upIsBad: true },
+      { metric: 'Throughput', curr: pTpLast, prev: pTpPrev, avg: pTpAvg, upIsBad: false },
+      { metric: 'TP / Person', curr: pTpPPLast, prev: pTpPPPrev, avg: pTpPPAvg, upIsBad: false },
+      { metric: 'Triage', curr: pTriage, prev: pTriagePrev, avg: null, upIsBad: true },
+      { metric: 'Aged >7d', curr: pAged, prev: null, avg: null, upIsBad: true },
     ]
 
+    const isPaused = !!holidays[pod.id]?._podPaused?.paused
+    const pauseResume = holidays[pod.id]?._podPaused?.resumeDate || ''
+    const pauseLabel = isPaused
+      ? ` <span class="exec-pod-paused">Paused${pauseResume ? ` · resumes ${new Date(pauseResume).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}` : ''}</span>`
+      : ''
+
     html += `
-      <div class="exec-pod-card" style="border-left-color:${color}">
+      <div class="exec-pod-card${isPaused ? ' paused' : ''}" style="border-left-color:${color}">
         <div class="exec-pod-header" data-exec-pod="${escHtml(pod.id)}">
           <div class="exec-health ${health.status}"></div>
-          <div class="exec-pod-name">${escHtml(pod.name)}</div>
-          <span class="exec-pod-toggle">▼</span>
+          <div class="exec-pod-name">${escHtml(pod.name)}${pauseLabel}</div>
+          <span class="exec-pod-toggle${isPaused ? ' collapsed' : ''}">▼</span>
         </div>
         ${desc ? `<div class="exec-pod-desc">${escHtml(desc)}</div>` : ''}
-        <div class="exec-pod-body" data-exec-body="${escHtml(pod.id)}">
+        <div class="exec-pod-body${isPaused ? ' collapsed' : ''}" data-exec-body="${escHtml(pod.id)}">
     `
+
+    // Per-pod insights (health traffic light stays as the dot, text alerts come from insights only)
+    if (pInsights.length) {
+      html += '<div class="exec-risks">'
+      for (const insight of pInsights) {
+        const icon = insight.type === 'positive' ? '✅' : insight.type === 'warning' ? '⚠️' : insight.type === 'info' ? 'ℹ️' : '🔴'
+        html += `<div class="exec-risk-item ${insight.type}"><span class="exec-risk-icon">${icon}</span>${escHtml(insight.text)}</div>`
+      }
+      html += '</div>'
+    }
 
     // WoW table
     html += `
           <table class="exec-wow-table">
-            <thead><tr><th>Metric</th><th>This Week</th><th>Last Week</th><th>Change</th></tr></thead>
+            <thead><tr><th>Metric</th><th>Last Week</th><th>Week Before</th><th>Change</th><th>Avg</th></tr></thead>
             <tbody>
     `
     for (const row of wowRows) {
-      const diff = row.prev != null ? row.curr - row.prev : null
+      const diff = row.prev != null ? +(row.curr - row.prev).toFixed(1) : null
       let deltaCls = 'exec-wow-delta-neutral'
       let deltaText = '—'
       if (diff != null) {
         if (diff === 0) { deltaText = '→ same' }
         else {
           const arrow = diff > 0 ? '↑' : '↓'
-          deltaText = `${arrow}${Math.abs(diff)}`
+          const absDiff = Math.abs(diff) % 1 === 0 ? Math.abs(diff) : Math.abs(diff).toFixed(1)
+          const pct = row.prev > 0 ? ` (${Math.round(Math.abs(diff / row.prev) * 100)}%)` : ''
+          deltaText = `${arrow}${absDiff}${pct}`
           if (row.upIsBad) deltaCls = diff > 0 ? 'exec-wow-delta-bad' : 'exec-wow-delta-good'
           else deltaCls = diff > 0 ? 'exec-wow-delta-good' : 'exec-wow-delta-bad'
         }
@@ -881,29 +1015,42 @@ async function buildExecutiveSummaryPanel(cachedData, settings) {
         <td>${row.curr}</td>
         <td>${row.prev != null ? row.prev : '—'}</td>
         <td class="${deltaCls}">${deltaText}</td>
+        <td class="exec-wow-avg">${row.avg != null ? row.avg : '—'}</td>
       </tr>`
     }
     html += '</tbody></table>'
 
+    // Work item breakdown
+    html += `
+          <div class="exec-breakdown">
+            <div class="exec-breakdown-group">
+              <span class="exec-breakdown-label">Type</span>
+              <span class="badge badge-bug">Bug ${pBugs}</span>
+              <span class="badge badge-story">Story ${pStories}</span>
+              ${pOther > 0 ? `<span class="badge badge-other">Other ${pOther}</span>` : ''}
+            </div>
+            <div class="exec-breakdown-group">
+              <span class="exec-breakdown-label">Priority</span>
+              ${pP1 > 0 ? `<span class="badge badge-p1">P1 ${pP1}</span>` : ''}
+              ${pP2 > 0 ? `<span class="badge badge-p2">P2 ${pP2}</span>` : ''}
+              ${pP3 > 0 ? `<span class="badge badge-p3">P3 ${pP3}</span>` : ''}
+              ${pP4 > 0 ? `<span class="badge badge-p4">P4 ${pP4}</span>` : ''}
+              ${pP1 + pP2 + pP3 + pP4 === 0 ? '<span style="color:var(--muted);font-size:.75rem">None set</span>' : ''}
+            </div>
+          </div>
+    `
+
     // Predictability badge
     if (pred) {
+      const predRating = pred.rating.toLowerCase()
       html += `
         <div class="exec-predictability">
-          <span class="exec-pred-badge" style="background:${pred.ratingColor}20;color:${pred.ratingColor}">
+          <span class="exec-pred-badge" data-rating="${predRating}">
             Predictability: ${pred.rating} (CV ${pred.cv})
           </span>
-          <span style="font-size:.75rem;color:var(--muted)">avg ${pred.mean}/wk ± ${pred.stdDev}</span>
+          <span class="exec-pred-sub">avg ${pred.mean}/wk ± ${pred.stdDev}</span>
         </div>
       `
-    }
-
-    // Health risks
-    if (health.reasons.length) {
-      html += '<div class="exec-risks">'
-      for (const reason of health.reasons) {
-        html += `<div class="exec-risk-item"><span class="exec-risk-icon">⚠️</span>${escHtml(reason)}</div>`
-      }
-      html += '</div>'
     }
 
     // Notes
@@ -1304,8 +1451,8 @@ async function renderAll(data) {
 
   const showExecSummary = !!settings.executiveSummary
   buildTabs(pods, showExecSummary);
-  await buildOverviewPanel(data);
-  if (showExecSummary) await buildExecutiveSummaryPanel(data, settings);
+  await buildOverviewPanel(data, pods);
+  if (showExecSummary) await buildExecutiveSummaryPanel(data, settings, pods);
   pods.forEach(pod => buildPodPanel(pod));
 
   // Restore previously active tab

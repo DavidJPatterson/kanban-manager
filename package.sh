@@ -23,6 +23,8 @@ zip -r "$OUT" \
   board.js \
   options.html \
   options.js \
+  team.html \
+  team.js \
   icons/icon-16.png \
   icons/icon-48.png \
   icons/icon-128.png \

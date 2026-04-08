@@ -36,6 +36,7 @@ const STORAGE_KEYS = {
   boardFilters: 'boardFilters',
   theme: 'theme',
   execSummaryNotes: 'execSummaryNotes',
+  teamHolidays: 'teamHolidays',
 }
 
 // ─── Storage helpers ───────────────────────────────────────────────────────────
@@ -356,6 +357,24 @@ async function fetchWipLimits(pod, settings) {
     return { wipLimits, teamId: team.id, boardName }
   } catch (_) {
     return { wipLimits: {}, teamId: null, boardName: null }
+  }
+}
+
+// Fetch team members for a pod's ADO team
+async function fetchTeamMembers(teamId, settings) {
+  if (!teamId) return []
+  try {
+    const resp = await adoFetch(
+      `https://dev.azure.com/${encodeURIComponent(settings.org)}/_apis/projects/${encodeURIComponent(settings.project)}/teams/${teamId}/members?api-version=7.1`,
+      settings
+    )
+    return (resp.value || []).map(m => ({
+      id: m.identity?.id || m.identity?.uniqueName || '',
+      name: m.identity?.displayName || 'Unknown',
+      uniqueName: m.identity?.uniqueName || ''
+    }))
+  } catch (_) {
+    return []
   }
 }
 
@@ -703,6 +722,7 @@ function calcStaleItems(items, staleDays = 2) {
     return {
       id: item.id,
       title: item.title,
+      type: item.type,
       assignee: item.assignee,
       boardColumn: item.boardColumn || 'Unknown',
       staleDaysActual,
@@ -836,76 +856,181 @@ function calcPodHealthStatus(pod, staleDays) {
  * Generate auto-insights / talking points for the executive summary.
  * Returns an array of { type: 'positive'|'warning'|'critical', text: string }
  */
-function calcExecInsights(cachedData, staleDays) {
-  const insights = []
+function calcExecInsights(cachedData, staleDays, holidays) {
+  const byPod = {}
+  const aggregate = []
   const pods = Object.values(cachedData.pods)
+  const order = { critical: 0, warning: 1, info: 2, positive: 3 }
+  holidays = holidays || {}
 
   for (const pod of pods) {
+    const podInsights = []
     const items = pod.items || []
     const active = items.filter(i => !['Closed', 'Removed', 'Resolved'].includes(i.state))
-    const arrival = arrivalStats(items)
+
+    // Check if pod is paused
+    const podPause = holidays[pod.id]?._podPaused
+    if (podPause?.paused) {
+      const resumeText = podPause.resumeDate
+        ? `Resumes ${new Date(podPause.resumeDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}`
+        : 'No resume date set'
+      podInsights.push({ type: 'info', text: `Pod paused — ${resumeText}` })
+      podInsights.sort((a, b) => order[a.type] - order[b.type])
+      byPod[pod.id] = podInsights
+      continue
+    }
+
+    // Use shifted windows: last week vs week before (indices -2 and -3)
+    const arrival = calcWeeklyArrival(items, 4)
+    const arrLast = arrival[arrival.length - 2]?.count || 0
+    const arrPrev = arrival[arrival.length - 3]?.count || 0
+
     const tp = calcWeeklyThroughput(items, 4)
-    const tpLast = tp[tp.length - 1]?.count || 0
-    const tpPrev = tp[tp.length - 2]?.count || 0
+    const tpLast = tp[tp.length - 2]?.count || 0
+    const tpPrev = tp[tp.length - 3]?.count || 0
+
     const stale = calcStaleItems(items, staleDays || 2)
     const cols = columnCounts(active)
     const triage = colCount(cols, 'Triage', 'Intake')
 
-    // Positive: throughput increase
+    // Warning: no work in progress this week
+    const wip = active.filter(i => {
+      const col = (i.boardColumn || i.state || '').toLowerCase()
+      return col.includes('progress') || col.includes('active') || col.includes('review')
+    }).length
+    if (wip === 0 && active.length > 0) {
+      podInsights.push({ type: 'warning', text: 'No work in progress this week' })
+    }
+
+    // Positive: throughput increase (last week vs week before)
     if (tpPrev > 0 && tpLast > tpPrev) {
       const pctUp = Math.round(((tpLast - tpPrev) / tpPrev) * 100)
-      if (pctUp >= 20) insights.push({ type: 'positive', text: `${pod.name}: Throughput up ${pctUp}% (${tpPrev} → ${tpLast})` })
+      if (pctUp >= 20) podInsights.push({ type: 'positive', text: `Throughput up ${pctUp}% (${tpPrev} → ${tpLast})` })
     }
 
     // Positive: triage cleared
-    if (triage === 0 && arrival.prev7 > 0) {
-      insights.push({ type: 'positive', text: `${pod.name}: Triage backlog cleared` })
+    if (triage === 0 && arrPrev > 0) {
+      podInsights.push({ type: 'positive', text: 'Triage backlog cleared' })
     }
 
     // Warning: throughput drop
     if (tpPrev > 0 && tpLast < tpPrev) {
       const pctDown = Math.round(((tpPrev - tpLast) / tpPrev) * 100)
-      if (pctDown >= 25) insights.push({ type: 'warning', text: `${pod.name}: Throughput dropped ${pctDown}% (${tpPrev} → ${tpLast})` })
+      if (pctDown >= 25) podInsights.push({ type: 'warning', text: `Throughput dropped ${pctDown}% (${tpPrev} → ${tpLast})` })
     }
 
     // Warning: stale items rising
-    if (stale.total > 2) insights.push({ type: 'warning', text: `${pod.name}: ${stale.total} items stale or blocked` })
+    if (stale.total > 2) podInsights.push({ type: 'warning', text: `${stale.total} items stale or blocked` })
 
-    // Warning: demand > capacity
-    if (arrival.last7 > tpLast && arrival.last7 > 0 && tpLast > 0) {
-      insights.push({ type: 'warning', text: `${pod.name}: Arrival (${arrival.last7}) exceeding throughput (${tpLast})` })
+    // Warning: demand > capacity (last week)
+    if (arrLast > tpLast && arrLast > 0 && tpLast > 0) {
+      podInsights.push({ type: 'warning', text: `Arrival (${arrLast}) exceeded throughput (${tpLast}) last week` })
     }
 
     // Critical: blocked items
-    if (stale.blocked > 1) insights.push({ type: 'critical', text: `${pod.name}: ${stale.blocked} items blocked` })
+    if (stale.blocked > 1) podInsights.push({ type: 'critical', text: `${stale.blocked} items blocked` })
 
-    // Positive: bug ratio low
+    // Positive: bug ratio improved (last week vs week before)
     const bugTrend = calcBugRatioTrend(items, 4)
-    const lastBugPct = bugTrend[bugTrend.length - 1]?.pct || 0
-    const prevBugPct = bugTrend[bugTrend.length - 2]?.pct || 0
+    const lastBugPct = bugTrend[bugTrend.length - 2]?.pct || 0
+    const prevBugPct = bugTrend[bugTrend.length - 3]?.pct || 0
     if (prevBugPct > 25 && lastBugPct < 15) {
-      insights.push({ type: 'positive', text: `${pod.name}: Bug ratio improved ${prevBugPct}% → ${lastBugPct}%` })
+      podInsights.push({ type: 'positive', text: `Bug ratio improved ${prevBugPct}% → ${lastBugPct}%` })
     }
     // Warning: bug ratio spike
     if (lastBugPct > 35 && lastBugPct > prevBugPct) {
-      insights.push({ type: 'warning', text: `${pod.name}: Bug ratio spiked to ${lastBugPct}%` })
+      podInsights.push({ type: 'warning', text: `Bug ratio spiked to ${lastBugPct}%` })
     }
+
+    // Holiday / capacity insights
+    const podHols = holidays[pod.id] || {}
+    const memberIds = Object.keys(podHols).filter(k => k !== '_podPaused')
+    if (memberIds.length) {
+      const today = new Date()
+      today.setHours(0, 0, 0, 0)
+      const endOfWeek = new Date(today)
+      endOfWeek.setDate(today.getDate() + (5 - today.getDay()))
+      endOfWeek.setHours(23, 59, 59, 999)
+      const fmtShort = d => new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
+
+      // Count weekdays in a date range clipped to this week
+      function weekdaysOff(start, end) {
+        const s = new Date(Math.max(new Date(start).getTime(), today.getTime()))
+        const e = new Date(Math.min(new Date(end).setHours(23,59,59,999), endOfWeek.getTime()))
+        let days = 0
+        const d = new Date(s)
+        while (d <= e) {
+          const dow = d.getDay()
+          if (dow > 0 && dow < 6) days++
+          d.setDate(d.getDate() + 1)
+        }
+        return days
+      }
+
+      const load = teamLoad(items)
+      let offCount = 0
+      let maxDaysOff = 0
+
+      for (const mid of memberIds) {
+        const m = podHols[mid]
+        const offPeriods = (m.holidays || []).filter(h => {
+          if (!h.start || !h.end) return false
+          const s = new Date(h.start)
+          const e = new Date(h.end)
+          e.setHours(23, 59, 59, 999)
+          return e >= today && s <= endOfWeek
+        })
+        if (offPeriods.length) {
+          offCount++
+          const totalDays = offPeriods.reduce((s, h) => s + weekdaysOff(h.start, h.end), 0)
+          if (totalDays > maxDaysOff) maxDaysOff = totalDays
+
+          const range = offPeriods.map(h =>
+            h.start === h.end ? fmtShort(h.start) : `${fmtShort(h.start)}–${fmtShort(h.end)}`
+          ).join(', ')
+          podInsights.push({ type: 'info', text: `${m.name} off ${range}` })
+
+          // Only warn about active WIP if off for more than 1 day
+          if (totalDays > 1) {
+            const memberLoad = load[m.name]?.total || 0
+            if (memberLoad > 0) {
+              podInsights.push({ type: 'warning', text: `${m.name} has ${memberLoad} active items but is off ${totalDays} days` })
+            }
+          }
+        }
+      }
+
+      // Aggregate: only warn if multi-day absence or off for the whole week
+      if (memberIds.length > 1 && offCount > memberIds.length / 2) {
+        if (maxDaysOff <= 1) {
+          // Single shared day off (public holiday) — just note it, don't warn
+          podInsights.push({ type: 'info', text: `${offCount} of ${memberIds.length} team members off for the day` })
+        } else {
+          podInsights.push({ type: 'warning', text: `${offCount} of ${memberIds.length} team members off this week` })
+        }
+      }
+    }
+
+    podInsights.sort((a, b) => order[a.type] - order[b.type])
+    byPod[pod.id] = podInsights
   }
 
-  // Aggregate insights
+  // Aggregate insights (shifted: last week vs week before)
   const allItems = getAllItems(cachedData)
   const totalTp = calcWeeklyThroughput(allItems, 4)
-  const totalTpLast = totalTp[totalTp.length - 1]?.count || 0
-  const totalTpPrev = totalTp[totalTp.length - 2]?.count || 0
+  const totalTpLast = totalTp[totalTp.length - 2]?.count || 0
+  const totalTpPrev = totalTp[totalTp.length - 3]?.count || 0
   if (totalTpPrev > 0 && totalTpLast > totalTpPrev) {
     const pctUp = Math.round(((totalTpLast - totalTpPrev) / totalTpPrev) * 100)
-    if (pctUp >= 15) insights.push({ type: 'positive', text: `Overall throughput up ${pctUp}% across all pods` })
+    if (pctUp >= 15) aggregate.push({ type: 'positive', text: `Overall throughput up ${pctUp}% across all pods` })
+  }
+  if (totalTpPrev > 0 && totalTpLast < totalTpPrev) {
+    const pctDown = Math.round(((totalTpPrev - totalTpLast) / totalTpPrev) * 100)
+    if (pctDown >= 15) aggregate.push({ type: 'warning', text: `Overall throughput down ${pctDown}% across all pods` })
   }
 
-  // Sort: critical first, then warnings, then positive
-  const order = { critical: 0, warning: 1, positive: 2 }
-  insights.sort((a, b) => order[a.type] - order[b.type])
-  return insights
+  aggregate.sort((a, b) => order[a.type] - order[b.type])
+  return { byPod, aggregate }
 }
 
 // ─── Executive Summary: Notes persistence ────────────────────────────────────
@@ -919,6 +1044,20 @@ function getExecSummaryNotes() {
 function setExecSummaryNotes(notes) {
   return new Promise(resolve =>
     chrome.storage.local.set({ [STORAGE_KEYS.execSummaryNotes]: notes }, resolve)
+  )
+}
+
+// ─── Team Holidays persistence ──────────────────────────────────────────────
+
+function getTeamHolidays() {
+  return new Promise(r =>
+    chrome.storage.local.get(STORAGE_KEYS.teamHolidays, d => r(d[STORAGE_KEYS.teamHolidays] || {}))
+  )
+}
+
+function setTeamHolidays(data) {
+  return new Promise(r =>
+    chrome.storage.local.set({ [STORAGE_KEYS.teamHolidays]: data }, r)
   )
 }
 

@@ -4,6 +4,44 @@ All notable changes to Kanban Manager are documented here.
 
 ---
 
+## [1.3.0] — 2026-04-08
+
+### Added
+
+- **Executive Summary: last week vs week before** — All metrics now compare the last completed week against the week before, instead of the current (incomplete) week. Current week arrival and throughput are shown as secondary "this week so far" values with bug/story splits.
+- **Executive Summary: averages** — Aggregate KPI cards and per-pod WoW tables now show an 8-week rolling average for Arrival, Throughput, and TP/Person, giving historical context to weekly figures.
+- **Executive Summary: throughput per person** — New aggregate KPI card and per-pod WoW table row showing throughput divided by active contributors.
+- **Executive Summary: bug/story splits** — Arrival, Throughput, and Active WIP aggregate cards now break down totals by work item type (bugs vs stories), including this-week splits.
+- **Executive Summary: work item breakdown per pod** — Each pod card now shows active item counts by type (Bug/Story/Other) and priority (P1–P4) as colour-coded badges.
+- **Executive Summary: backlog count** — Active WIP card now shows items in backlog (not in progress) with bug/story split, replacing the less useful "total active" count.
+- **Executive Summary: clickable stale/blocked items** — Stale/Blocked KPI card now shows individual work item IDs as clickable links to Azure DevOps, colour-coded by type (red = bug, blue = story).
+- **Executive Summary: per-pod insights** — Auto-generated insights (throughput changes, demand vs capacity, stale items, bug ratio, zero WIP) are now shown inside each pod card instead of as a flat list at the top.
+- **Executive Summary: pod paused state** — Pods can be marked as "paused" (e.g. team on bug rotation) via the Team page. Paused pods load collapsed in the exec summary with a "Paused · resumes 6 May" label, dimmed styling, and all alerts suppressed.
+- **Team Management page** — New `team.html` page accessible via "👥 Team" button in the board header. Auto-fetches team members from Azure DevOps per pod, with "Sync All Pods" for first-time setup.
+- **Holiday scheduling** — Per-member holiday date ranges managed on the Team page. Holidays surface as info callouts in exec summary pod cards ("John off 8–10 Apr"). Multi-day absences with active WIP trigger warnings. Single-day absences (public holidays) generate softer messaging.
+- **Pod pause toggle** — Team page includes a per-pod "Pod paused" checkbox with optional resume date, for teams temporarily not producing (e.g. bug rotation).
+- **`info` insight type** — New blue-coloured insight type for informational callouts (holidays, capacity notes), sorted between warnings and positive insights.
+
+### Improved
+
+- **Executive Summary: pod ordering stable** — Exec summary pod cards now use the settings-sorted pod array instead of `Object.values(cachedData.pods)`, fixing random reordering on refresh.
+- **Executive Summary: aged threshold** — Changed from >90 days (useless) to >7 days (actionable).
+- **Executive Summary: percentage change in WoW table** — Per-pod delta column now shows percentage alongside absolute change (e.g. "↓2 (40%)").
+- **Executive Summary: risk item styling** — Pod risk items now use the same left-border colour treatment as aggregate insights, with type-specific colours and light theme support.
+- **Executive Summary: predictability badge** — Replaced inline `style=` with `data-rating` CSS attribute selectors for Stable/Moderate/Volatile states.
+- **Executive Summary: WoW avg column** — Replaced inline `style=` with `.exec-wow-avg` CSS class.
+- **Executive Summary: notes textarea** — Increased min-height from 3rem to 5rem for more usable meeting notes.
+- **Holiday date UX** — Changing the "from" date on a holiday period auto-updates the "to" date if it would be earlier, so single-day holidays only need one click.
+- **Team page loads collapsed** — All pod sections on the Team page load collapsed by default.
+- **Package script** — `team.html` and `team.js` added to `package.sh` for Chrome Web Store builds.
+
+### Fixed
+
+- **Overview pod ordering** — Pod summary cards and Flow by Pod charts now respect settings order. Previously only tabs were sorted; the overview panel independently derived pods from the raw cache object in arbitrary order.
+- **`_podPaused` rendered as team member** — The pod pause metadata stored in the holidays object is now filtered out when rendering the member list and counting members.
+
+---
+
 ## [1.2.0] — 2026-03-30
 
 ### Added

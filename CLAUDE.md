@@ -279,6 +279,21 @@ The arrival date is calculated by tracing an item's update history (`/updates` e
 - **Do not add semicolons** to existing files (the style is semicolon-free)
 - **Do not commit** `*.zip`, `*.crx`, or `*.pem` files (they are in `.gitignore`)
 
+## Rules for Making Changes
+
+### Trace every consumer before fixing
+When fixing a bug or changing behaviour (e.g. ordering, filtering, formatting), **grep for every place the affected data is read or derived** before writing code. A fix that only patches one call site is a partial fix. Specifically:
+
+- If you change how data is sorted/filtered in `renderAll()`, check that `buildOverviewPanel()`, `buildPodPanel()`, `buildTabs()`, and `popup.js` all receive or respect that change.
+- `Object.values(cachedData.pods)` returns pods in **arbitrary order**. Any code that iterates pods must use a settings-sorted array, never raw `Object.values()`.
+- Search for the pattern you're fixing (e.g. `Object.values(cachedData.pods)`, `pods.forEach`) across **all files** to find every instance.
+
+### Data flows through layers — fix at the right level
+The render pipeline is: `cachedData → renderAll() → buildTabs / buildOverviewPanel / buildPodPanel`. If a fix belongs in `renderAll()` (the orchestrator), make sure the fixed value is **passed down** to every function it calls rather than expecting each function to independently re-derive and re-fix it.
+
+### Verify the full UI after a fix
+This extension has three UI surfaces that share data: **board tabs**, **overview panel** (summary cards + Flow by Pod + optional charts), and **popup**. A fix to shared data must be verified against all three.
+
 ## Common Tasks
 
 ### Add a new chart to the Overview tab
