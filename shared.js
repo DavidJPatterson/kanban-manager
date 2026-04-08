@@ -7,6 +7,7 @@ const DEFAULT_SETTINGS = {
   staleDays: 2,
   pat: '',
   pods: [],
+  executiveSummary: false,
   overviewCharts: {
     cycleTimeInProgress: false,
     cycleTimeArrival: false,
@@ -34,6 +35,7 @@ const STORAGE_KEYS = {
   startedAtCacheVersion: 'startedAtCacheVersion',
   boardFilters: 'boardFilters',
   theme: 'theme',
+  execSummaryNotes: 'execSummaryNotes',
 }
 
 // ─── Storage helpers ───────────────────────────────────────────────────────────
@@ -763,6 +765,161 @@ function arrivalStats(items) {
   const prev7  = weekly[weekly.length - 2]?.count || 0;
   const last30 = weekly.slice(-4).reduce((s, w) => s + w.count, 0);
   return { last7, prev7, last30, avgPerWeek: +(last30 / 4.3).toFixed(1) };
+}
+
+// ─── Executive Summary: Pod Health Status ────────────────────────────────────
+
+// Keywords that identify "ready" columns — these are NOT flagged as WIP concerns
+const READY_COLUMN_KEYWORDS = ['ready']
+
+function isReadyColumn(colName) {
+  return READY_COLUMN_KEYWORDS.some(kw => colName.toLowerCase().includes(kw))
+}
+
+/**
+ * Compute a health traffic light for a single pod.
+ * Returns { status: 'green'|'amber'|'red', reasons: string[] }
+ *
+ * Green:  throughput >= arrival AND no stale/blocked items AND no active-column WIP breaches
+ * Amber:  throughput < arrival OR stale items > 0 OR active-column WIP breach
+ * Red:    throughput < arrival AND (stale/blocked items OR rising WIP trend)
+ */
+function calcPodHealthStatus(pod, staleDays) {
+  const items = pod.items || []
+  const active = items.filter(i => !['Closed', 'Removed', 'Resolved'].includes(i.state))
+  const arrival = arrivalStats(items)
+  const tp = calcWeeklyThroughput(items, 4)
+  const tpLast = tp[tp.length - 1]?.count || 0
+  const tpPrev = tp[tp.length - 2]?.count || 0
+  const stale = calcStaleItems(items, staleDays || 2)
+  const wipLimits = pod.wipLimits || {}
+
+  const reasons = []
+
+  // Throughput vs arrival
+  const arrivalExceedsTp = arrival.last7 > 0 && tpLast < arrival.last7
+  if (arrivalExceedsTp) reasons.push(`Arrival (${arrival.last7}) exceeds throughput (${tpLast})`)
+
+  // Declining throughput
+  if (tpPrev > 0 && tpLast < tpPrev) {
+    const pctDrop = Math.round(((tpPrev - tpLast) / tpPrev) * 100)
+    if (pctDrop >= 25) reasons.push(`Throughput dropped ${pctDrop}% vs last week`)
+  }
+
+  // Stale/blocked items
+  if (stale.blocked > 0) reasons.push(`${stale.blocked} blocked item${stale.blocked !== 1 ? 's' : ''}`)
+  if (stale.total - stale.blocked > 0) {
+    const staleOnly = stale.total - stale.blocked
+    reasons.push(`${staleOnly} stale item${staleOnly !== 1 ? 's' : ''} (no change in ${staleDays || 2}+ days)`)
+  }
+
+  // WIP limit breaches — only for non-Ready columns
+  const breaches = Object.entries(wipLimits).filter(([col, lim]) => {
+    if (isReadyColumn(col)) return false
+    const cnt = active.filter(i => (i.boardColumn || i.state) === col).length
+    return cnt > lim
+  })
+  for (const [col, lim] of breaches) {
+    const cnt = active.filter(i => (i.boardColumn || i.state) === col).length
+    reasons.push(`WIP over in ${col}: ${cnt}/${lim}`)
+  }
+
+  // Determine status
+  let status = 'green'
+  if (reasons.length > 0) status = 'amber'
+  if (arrivalExceedsTp && (stale.total > 0 || breaches.length > 0)) status = 'red'
+
+  return { status, reasons }
+}
+
+/**
+ * Generate auto-insights / talking points for the executive summary.
+ * Returns an array of { type: 'positive'|'warning'|'critical', text: string }
+ */
+function calcExecInsights(cachedData, staleDays) {
+  const insights = []
+  const pods = Object.values(cachedData.pods)
+
+  for (const pod of pods) {
+    const items = pod.items || []
+    const active = items.filter(i => !['Closed', 'Removed', 'Resolved'].includes(i.state))
+    const arrival = arrivalStats(items)
+    const tp = calcWeeklyThroughput(items, 4)
+    const tpLast = tp[tp.length - 1]?.count || 0
+    const tpPrev = tp[tp.length - 2]?.count || 0
+    const stale = calcStaleItems(items, staleDays || 2)
+    const cols = columnCounts(active)
+    const triage = colCount(cols, 'Triage', 'Intake')
+
+    // Positive: throughput increase
+    if (tpPrev > 0 && tpLast > tpPrev) {
+      const pctUp = Math.round(((tpLast - tpPrev) / tpPrev) * 100)
+      if (pctUp >= 20) insights.push({ type: 'positive', text: `${pod.name}: Throughput up ${pctUp}% (${tpPrev} → ${tpLast})` })
+    }
+
+    // Positive: triage cleared
+    if (triage === 0 && arrival.prev7 > 0) {
+      insights.push({ type: 'positive', text: `${pod.name}: Triage backlog cleared` })
+    }
+
+    // Warning: throughput drop
+    if (tpPrev > 0 && tpLast < tpPrev) {
+      const pctDown = Math.round(((tpPrev - tpLast) / tpPrev) * 100)
+      if (pctDown >= 25) insights.push({ type: 'warning', text: `${pod.name}: Throughput dropped ${pctDown}% (${tpPrev} → ${tpLast})` })
+    }
+
+    // Warning: stale items rising
+    if (stale.total > 2) insights.push({ type: 'warning', text: `${pod.name}: ${stale.total} items stale or blocked` })
+
+    // Warning: demand > capacity
+    if (arrival.last7 > tpLast && arrival.last7 > 0 && tpLast > 0) {
+      insights.push({ type: 'warning', text: `${pod.name}: Arrival (${arrival.last7}) exceeding throughput (${tpLast})` })
+    }
+
+    // Critical: blocked items
+    if (stale.blocked > 1) insights.push({ type: 'critical', text: `${pod.name}: ${stale.blocked} items blocked` })
+
+    // Positive: bug ratio low
+    const bugTrend = calcBugRatioTrend(items, 4)
+    const lastBugPct = bugTrend[bugTrend.length - 1]?.pct || 0
+    const prevBugPct = bugTrend[bugTrend.length - 2]?.pct || 0
+    if (prevBugPct > 25 && lastBugPct < 15) {
+      insights.push({ type: 'positive', text: `${pod.name}: Bug ratio improved ${prevBugPct}% → ${lastBugPct}%` })
+    }
+    // Warning: bug ratio spike
+    if (lastBugPct > 35 && lastBugPct > prevBugPct) {
+      insights.push({ type: 'warning', text: `${pod.name}: Bug ratio spiked to ${lastBugPct}%` })
+    }
+  }
+
+  // Aggregate insights
+  const allItems = getAllItems(cachedData)
+  const totalTp = calcWeeklyThroughput(allItems, 4)
+  const totalTpLast = totalTp[totalTp.length - 1]?.count || 0
+  const totalTpPrev = totalTp[totalTp.length - 2]?.count || 0
+  if (totalTpPrev > 0 && totalTpLast > totalTpPrev) {
+    const pctUp = Math.round(((totalTpLast - totalTpPrev) / totalTpPrev) * 100)
+    if (pctUp >= 15) insights.push({ type: 'positive', text: `Overall throughput up ${pctUp}% across all pods` })
+  }
+
+  // Sort: critical first, then warnings, then positive
+  const order = { critical: 0, warning: 1, positive: 2 }
+  insights.sort((a, b) => order[a.type] - order[b.type])
+  return insights
+}
+
+// ─── Executive Summary: Notes persistence ────────────────────────────────────
+
+function getExecSummaryNotes() {
+  return new Promise(resolve =>
+    chrome.storage.local.get(STORAGE_KEYS.execSummaryNotes, r => resolve(r[STORAGE_KEYS.execSummaryNotes] || {}))
+  )
+}
+
+function setExecSummaryNotes(notes) {
+  return new Promise(resolve =>
+    chrome.storage.local.set({ [STORAGE_KEYS.execSummaryNotes]: notes }, resolve)
+  )
 }
 
 // Sums counts for all column keys containing any of the given substrings (case-insensitive).

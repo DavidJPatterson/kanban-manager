@@ -28,6 +28,7 @@ function renderPodList(pods) {
       <input class="pod-name-input" type="text" placeholder="Pod name" value="${escAttr(pod.name)}" data-field="name" />
       <input class="pod-path-input" type="text" placeholder="Platform\\Team\\Pod X" value="${escAttr(pod.areaPath)}" data-field="areaPath" />
       <button class="pod-remove-btn" title="Remove pod">✕</button>
+      <textarea class="pod-desc-input" placeholder="Brief description for executive summary" data-field="description" rows="1">${escAttr(pod.description || '')}</textarea>
     `;
     row.querySelector('.pod-remove-btn').addEventListener('click', () => {
       row.remove();
@@ -44,7 +45,8 @@ function readPods() {
   return Array.from($('pods-list').querySelectorAll('.pod-row')).map(row => ({
     id: row.dataset.podId || ('pod-' + Date.now().toString(36)),
     name: row.querySelector('[data-field="name"]').value.trim(),
-    areaPath: row.querySelector('[data-field="areaPath"]').value.trim()
+    areaPath: row.querySelector('[data-field="areaPath"]').value.trim(),
+    description: (row.querySelector('[data-field="description"]')?.value || '').trim()
   })).filter(p => p.name && p.areaPath);
 }
 
@@ -64,6 +66,9 @@ document.addEventListener('DOMContentLoaded', () => {
     $('refreshInterval').value = String(s.refreshInterval || 15);
     $('staleDays').value = String(s.staleDays || 2);
     renderPodList(s.pods || []);
+
+    // Executive summary toggle
+    $('exec-summary').checked = !!s.executiveSummary;
 
     // Overview chart toggles
     const oc = s.overviewCharts || {};
@@ -105,6 +110,7 @@ document.addEventListener('DOMContentLoaded', () => {
       <input class="pod-name-input" type="text" placeholder="Pod name" data-field="name" />
       <input class="pod-path-input" type="text" placeholder="Platform\\Team\\Pod X" data-field="areaPath" />
       <button class="pod-remove-btn" title="Remove pod">✕</button>
+      <textarea class="pod-desc-input" placeholder="Brief description for executive summary" data-field="description" rows="1"></textarea>
     `;
     row.querySelector('.pod-remove-btn').addEventListener('click', () => row.remove());
     list.appendChild(row);
@@ -123,6 +129,7 @@ function save() {
     refreshInterval: parseInt($('refreshInterval').value, 10),
     staleDays: parseInt($('staleDays').value, 10) || 2,
     pods,
+    executiveSummary: $('exec-summary').checked,
     overviewCharts: {
       cycleTimeInProgress: $('ct-in-progress').checked,
       cycleTimeArrival: $('ct-arrival').checked,
