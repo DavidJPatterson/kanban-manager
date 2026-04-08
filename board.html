@@ -281,6 +281,96 @@
   .skeleton-col-header { height: 1.5rem; width: 60%; border-radius: 6px; }
 
   footer { text-align: center; padding: .75rem; font-size: .75rem; color: var(--muted); border-top: 1px solid var(--border); }
+
+  /* ── Executive Summary ── */
+  .exec-header { padding: 1rem 1.25rem .5rem; }
+  .exec-title { font-size: 1.25rem; font-weight: 700; }
+  .exec-date { font-size: .75rem; color: var(--muted); margin-top: .15rem; }
+
+  .exec-insights { padding: 0 1.25rem .75rem; display: flex; flex-direction: column; gap: .35rem; }
+  .exec-insight {
+    display: flex; align-items: center; gap: .5rem; font-size: .8rem;
+    padding: .4rem .65rem; border-radius: 6px; border-left: 3px solid;
+  }
+  .exec-insight.positive { background: rgba(34,197,94,.08); border-left-color: #22c55e; color: #86efac; }
+  .exec-insight.warning { background: rgba(245,158,11,.08); border-left-color: #f59e0b; color: #fcd34d; }
+  .exec-insight.critical { background: rgba(239,68,68,.08); border-left-color: #ef4444; color: #fca5a5; }
+  [data-theme="light"] .exec-insight.positive { color: #15803d; }
+  [data-theme="light"] .exec-insight.warning { color: #a16207; }
+  [data-theme="light"] .exec-insight.critical { color: #b91c1c; }
+  .exec-insight-icon { font-size: 1rem; flex-shrink: 0; }
+
+  .exec-aggregate {
+    margin: 0 1.25rem .75rem; padding: .75rem 1rem;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+  }
+  .exec-aggregate-title { font-size: .875rem; font-weight: 700; margin-bottom: .5rem; }
+  .exec-agg-grid { display: flex; gap: .75rem; flex-wrap: wrap; }
+  .exec-agg-card { flex: 1; min-width: 110px; background: var(--bg); border-radius: 8px; padding: .5rem .7rem; }
+  .exec-agg-label { font-size: .625rem; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+  .exec-agg-val { font-size: 1.5rem; font-weight: 700; line-height: 1.1; }
+  .exec-agg-delta { font-size: .75rem; margin-top: .15rem; }
+  .exec-delta-up { color: #ef4444; }
+  .exec-delta-down { color: #22c55e; }
+  .exec-delta-flat { color: var(--muted); }
+
+  .exec-pods { padding: 0 1.25rem; display: flex; flex-direction: column; gap: .75rem; padding-bottom: 1rem; }
+  .exec-pod-card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+    border-left: 4px solid var(--border); overflow: hidden;
+  }
+  .exec-pod-header {
+    display: flex; align-items: center; gap: .75rem;
+    padding: .75rem 1rem; cursor: pointer; user-select: none;
+  }
+  .exec-pod-header:hover { background: rgba(255,255,255,.02); }
+  .exec-health {
+    width: 14px; height: 14px; border-radius: 50%; flex-shrink: 0;
+    box-shadow: 0 0 6px currentColor;
+  }
+  .exec-health.green { background: #22c55e; color: #22c55e; }
+  .exec-health.amber { background: #f59e0b; color: #f59e0b; }
+  .exec-health.red { background: #ef4444; color: #ef4444; }
+  .exec-pod-name { font-size: 1rem; font-weight: 700; flex: 1; }
+  .exec-pod-toggle { font-size: .75rem; color: var(--muted); transition: transform .15s; }
+  .exec-pod-toggle.collapsed { transform: rotate(-90deg); }
+  .exec-pod-desc { font-size: .75rem; color: var(--muted); padding: 0 1rem; margin-top: -.25rem; margin-bottom: .5rem; }
+
+  .exec-pod-body { padding: 0 1rem .75rem; }
+  .exec-pod-body.collapsed { display: none; }
+
+  .exec-wow-table { width: 100%; border-collapse: collapse; font-size: .75rem; margin-bottom: .5rem; }
+  .exec-wow-table th {
+    text-align: left; font-weight: 600; text-transform: uppercase; letter-spacing: .04em;
+    color: var(--muted); padding: .3rem .5rem; border-bottom: 1px solid var(--border); font-size: .625rem;
+  }
+  .exec-wow-table td { padding: .35rem .5rem; border-bottom: 1px solid rgba(255,255,255,.04); }
+  .exec-wow-table tr:last-child td { border-bottom: none; }
+  .exec-wow-metric { font-weight: 600; color: var(--text); }
+  .exec-wow-delta-good { color: #22c55e; font-weight: 600; }
+  .exec-wow-delta-bad { color: #ef4444; font-weight: 600; }
+  .exec-wow-delta-neutral { color: var(--muted); }
+
+  .exec-risks { display: flex; flex-direction: column; gap: .25rem; margin-bottom: .5rem; }
+  .exec-risk-item {
+    display: flex; align-items: center; gap: .4rem; font-size: .75rem;
+    padding: .25rem .4rem; background: rgba(239,68,68,.06); border-radius: 4px;
+  }
+  .exec-risk-icon { flex-shrink: 0; }
+
+  .exec-notes-label { font-size: .625rem; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin-bottom: .25rem; font-weight: 600; }
+  .exec-notes {
+    width: 100%; min-height: 3rem; background: var(--bg); border: 1px solid var(--border);
+    border-radius: 6px; color: var(--text); font-size: .8rem; padding: .5rem .65rem;
+    font-family: inherit; resize: vertical; line-height: 1.5;
+  }
+  .exec-notes:focus { border-color: #3b82f6; outline: none; }
+  .exec-notes::placeholder { color: var(--border); }
+
+  .exec-predictability { display: flex; gap: .5rem; margin-bottom: .5rem; flex-wrap: wrap; }
+  .exec-pred-badge {
+    font-size: .75rem; font-weight: 600; padding: .2rem .5rem; border-radius: 10px;
+  }
 </style>
 </head>
 <body>

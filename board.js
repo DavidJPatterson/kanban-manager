@@ -53,7 +53,7 @@ function hideBanner() { $('banner').className = 'banner'; }
 
 let _activeTab = 'overview';
 
-function buildTabs(pods) {
+function buildTabs(pods, showExecSummary) {
   const bar = $('tab-bar');
   bar.style.display = '';
   bar.innerHTML = '';
@@ -65,6 +65,16 @@ function buildTabs(pods) {
   ovBtn.textContent = '📊 Overview';
   ovBtn.addEventListener('click', () => switchTab('overview'));
   bar.appendChild(ovBtn);
+
+  // Executive Summary tab (optional)
+  if (showExecSummary) {
+    const esBtn = document.createElement('button');
+    esBtn.className = 'tab-btn';
+    esBtn.dataset.tab = 'exec-summary';
+    esBtn.textContent = '📋 Executive Summary';
+    esBtn.addEventListener('click', () => switchTab('exec-summary'));
+    bar.appendChild(esBtn);
+  }
 
   // One tab per pod
   pods.forEach(pod => {
@@ -701,6 +711,238 @@ async function buildOverviewPanel(cachedData, sortedPods) {
   }
 }
 
+// ─── Executive Summary panel ─────────────────────────────────────────────────
+
+async function buildExecutiveSummaryPanel(cachedData, settings) {
+  const container = $('panels-container')
+  let panel = container.querySelector('[data-tab="exec-summary"]')
+  if (!panel) {
+    panel = document.createElement('div')
+    panel.className = 'tab-panel'
+    panel.dataset.tab = 'exec-summary'
+    container.appendChild(panel)
+  }
+
+  const pods = Object.values(cachedData.pods)
+  const allItems = getAllItems(cachedData)
+  const staleDays = settings.staleDays || 2
+  const podSettings = settings.pods || []
+  const notes = await getExecSummaryNotes()
+
+  // Week label
+  const now = new Date()
+  const weekStart = new Date(now)
+  weekStart.setDate(now.getDate() - now.getDay() + 1) // Monday
+  const weekLabel = weekStart.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })
+
+  // ── Aggregate stats ──
+  const totalArrival = arrivalStats(allItems)
+  const totalTp = calcWeeklyThroughput(allItems, 4)
+  const totalTpLast = totalTp[totalTp.length - 1]?.count || 0
+  const totalTpPrev = totalTp[totalTp.length - 2]?.count || 0
+  const totalActive = allItems.filter(i => !['Closed', 'Removed', 'Resolved'].includes(i.state))
+  const totalWip = totalActive.filter(i => {
+    const col = (i.boardColumn || i.state || '').toLowerCase()
+    return col.includes('progress') || col.includes('active') || col.includes('review')
+  }).length
+  const totalStale = calcStaleItems(allItems, staleDays)
+
+  // ── Auto-insights ──
+  const insights = calcExecInsights(cachedData, staleDays)
+
+  // ── Build HTML ──
+  let html = ''
+
+  // Header
+  html += `
+    <div class="exec-header">
+      <div class="exec-title">Executive Summary</div>
+      <div class="exec-date">Week of ${escHtml(weekLabel)}</div>
+    </div>
+  `
+
+  // Auto-generated insights
+  if (insights.length) {
+    html += '<div class="exec-insights">'
+    for (const insight of insights) {
+      const icon = insight.type === 'positive' ? '✅' : insight.type === 'warning' ? '⚠️' : '🔴'
+      html += `<div class="exec-insight ${insight.type}"><span class="exec-insight-icon">${icon}</span>${escHtml(insight.text)}</div>`
+    }
+    html += '</div>'
+  }
+
+  // Aggregate KPIs
+  function deltaHtml(curr, prev, invertColor) {
+    const diff = curr - prev
+    if (diff === 0) return '<div class="exec-agg-delta exec-delta-flat">→ same</div>'
+    const arrow = diff > 0 ? '↑' : '↓'
+    const pct = prev > 0 ? ` (${Math.round(Math.abs(diff / prev) * 100)}%)` : ''
+    // For arrival, up is bad. For throughput, up is good. invertColor flips it.
+    const cls = invertColor
+      ? (diff > 0 ? 'exec-delta-down' : 'exec-delta-up')
+      : (diff > 0 ? 'exec-delta-up' : 'exec-delta-down')
+    return `<div class="exec-agg-delta ${cls}">${arrow}${Math.abs(diff)}${pct} vs prev wk</div>`
+  }
+
+  html += `
+    <div class="exec-aggregate">
+      <div class="exec-aggregate-title">All Pods — This Week vs Last</div>
+      <div class="exec-agg-grid">
+        <div class="exec-agg-card">
+          <div class="exec-agg-label">Arrival</div>
+          <div class="exec-agg-val kv-arrival">${totalArrival.last7}</div>
+          ${deltaHtml(totalArrival.last7, totalArrival.prev7, false)}
+        </div>
+        <div class="exec-agg-card">
+          <div class="exec-agg-label">Throughput</div>
+          <div class="exec-agg-val kv-throughput">${totalTpLast}</div>
+          ${deltaHtml(totalTpLast, totalTpPrev, true)}
+        </div>
+        <div class="exec-agg-card">
+          <div class="exec-agg-label">Active WIP</div>
+          <div class="exec-agg-val kv-wip">${totalWip}</div>
+          <div class="exec-agg-delta exec-delta-flat">${totalActive.length} total active</div>
+        </div>
+        <div class="exec-agg-card">
+          <div class="exec-agg-label">Stale / Blocked</div>
+          <div class="exec-agg-val kv-aged">${totalStale.total}</div>
+          <div class="exec-agg-delta exec-delta-flat">${totalStale.blocked} blocked</div>
+        </div>
+      </div>
+    </div>
+  `
+
+  // Per-pod cards
+  html += '<div class="exec-pods">'
+
+  for (const pod of pods) {
+    const pItems = pod.items || []
+    const pActive = pItems.filter(i => !['Closed', 'Removed', 'Resolved'].includes(i.state))
+    const pArrival = arrivalStats(pItems)
+    const pTp = calcWeeklyThroughput(pItems, 4)
+    const pTpLast = pTp[pTp.length - 1]?.count || 0
+    const pTpPrev = pTp[pTp.length - 2]?.count || 0
+    const pCols = columnCounts(pActive)
+    const pTriage = colCount(pCols, 'Triage', 'Intake')
+    const pTriagePrev = (() => {
+      // Estimate prev week triage from arrival delta — not exact but directional
+      const prevTriage = pTriage + (pArrival.prev7 - pArrival.last7)
+      return Math.max(0, prevTriage)
+    })()
+    const pWip = colCount(pCols, 'In Progress', 'Active') + colCount(pCols, 'Code Review', 'Review')
+    const pAged = pActive.filter(x => ageDays(x) >= 90).length
+    const pStale = calcStaleItems(pItems, staleDays)
+    const health = calcPodHealthStatus(pod, staleDays)
+    const color = podColor(pod.id)
+    const podSetting = podSettings.find(p => p.id === pod.id) || {}
+    const desc = podSetting.description || ''
+    const podNote = notes[pod.id] || ''
+    const pred = calcThroughputPredictability(pItems, 8)
+
+    // Week-over-week comparison rows
+    const wowRows = [
+      { metric: 'Arrival', curr: pArrival.last7, prev: pArrival.prev7, upIsBad: true },
+      { metric: 'Throughput', curr: pTpLast, prev: pTpPrev, upIsBad: false },
+      { metric: 'Triage', curr: pTriage, prev: pTriagePrev, upIsBad: true },
+      { metric: 'Aged >90d', curr: pAged, prev: null, upIsBad: true },
+    ]
+
+    html += `
+      <div class="exec-pod-card" style="border-left-color:${color}">
+        <div class="exec-pod-header" data-exec-pod="${escHtml(pod.id)}">
+          <div class="exec-health ${health.status}"></div>
+          <div class="exec-pod-name">${escHtml(pod.name)}</div>
+          <span class="exec-pod-toggle">▼</span>
+        </div>
+        ${desc ? `<div class="exec-pod-desc">${escHtml(desc)}</div>` : ''}
+        <div class="exec-pod-body" data-exec-body="${escHtml(pod.id)}">
+    `
+
+    // WoW table
+    html += `
+          <table class="exec-wow-table">
+            <thead><tr><th>Metric</th><th>This Week</th><th>Last Week</th><th>Change</th></tr></thead>
+            <tbody>
+    `
+    for (const row of wowRows) {
+      const diff = row.prev != null ? row.curr - row.prev : null
+      let deltaCls = 'exec-wow-delta-neutral'
+      let deltaText = '—'
+      if (diff != null) {
+        if (diff === 0) { deltaText = '→ same' }
+        else {
+          const arrow = diff > 0 ? '↑' : '↓'
+          deltaText = `${arrow}${Math.abs(diff)}`
+          if (row.upIsBad) deltaCls = diff > 0 ? 'exec-wow-delta-bad' : 'exec-wow-delta-good'
+          else deltaCls = diff > 0 ? 'exec-wow-delta-good' : 'exec-wow-delta-bad'
+        }
+      }
+      html += `<tr>
+        <td class="exec-wow-metric">${escHtml(row.metric)}</td>
+        <td>${row.curr}</td>
+        <td>${row.prev != null ? row.prev : '—'}</td>
+        <td class="${deltaCls}">${deltaText}</td>
+      </tr>`
+    }
+    html += '</tbody></table>'
+
+    // Predictability badge
+    if (pred) {
+      html += `
+        <div class="exec-predictability">
+          <span class="exec-pred-badge" style="background:${pred.ratingColor}20;color:${pred.ratingColor}">
+            Predictability: ${pred.rating} (CV ${pred.cv})
+          </span>
+          <span style="font-size:.75rem;color:var(--muted)">avg ${pred.mean}/wk ± ${pred.stdDev}</span>
+        </div>
+      `
+    }
+
+    // Health risks
+    if (health.reasons.length) {
+      html += '<div class="exec-risks">'
+      for (const reason of health.reasons) {
+        html += `<div class="exec-risk-item"><span class="exec-risk-icon">⚠️</span>${escHtml(reason)}</div>`
+      }
+      html += '</div>'
+    }
+
+    // Notes
+    html += `
+          <div class="exec-notes-label">Meeting Notes</div>
+          <textarea class="exec-notes" data-note-pod="${escHtml(pod.id)}" placeholder="Add talking points for ${escHtml(pod.name)}…">${escHtml(podNote)}</textarea>
+        </div>
+      </div>
+    `
+  }
+
+  html += '</div>'
+  panel.innerHTML = html
+
+  // ── Wire interactions ──
+
+  // Pod card expand/collapse
+  panel.querySelectorAll('.exec-pod-header').forEach(header => {
+    header.addEventListener('click', () => {
+      const podId = header.dataset.execPod
+      const body = panel.querySelector(`[data-exec-body="${podId}"]`)
+      const toggle = header.querySelector('.exec-pod-toggle')
+      body.classList.toggle('collapsed')
+      toggle.classList.toggle('collapsed')
+    })
+  })
+
+  // Auto-save notes on blur
+  panel.querySelectorAll('.exec-notes').forEach(textarea => {
+    textarea.addEventListener('blur', async () => {
+      const podId = textarea.dataset.notePod
+      const current = await getExecSummaryNotes()
+      current[podId] = textarea.value
+      await setExecSummaryNotes(current)
+    })
+  })
+}
+
 // ─── Per-pod panel ────────────────────────────────────────────────────────────
 
 // Returns the display column name for an item (boardColumn from ADO, or state fallback)
@@ -1061,12 +1303,15 @@ async function renderAll(data) {
   const skel = $('loading-skeleton')
   if (skel) skel.remove()
 
-  buildTabs(pods);
+  const showExecSummary = !!settings.executiveSummary
+  buildTabs(pods, showExecSummary);
   await buildOverviewPanel(data, pods);
+  if (showExecSummary) await buildExecutiveSummaryPanel(data, settings);
   pods.forEach(pod => buildPodPanel(pod));
 
   // Restore previously active tab
-  switchTab(_activeTab in data.pods || _activeTab === 'overview' ? _activeTab : 'overview');
+  const validTabs = ['overview', ...(showExecSummary ? ['exec-summary'] : []), ...Object.keys(data.pods)]
+  switchTab(validTabs.includes(_activeTab) ? _activeTab : 'overview');
 
   $('last-updated').textContent = fmtDate(data.fetchedAt);
   const podErrors = pods.filter(p => p.error);

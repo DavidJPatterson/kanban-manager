@@ -65,10 +65,17 @@
     background: var(--input-bg); border: 1px solid var(--border); border-radius: 8px; padding: 0.5rem 0.6rem;
   }
   .pod-color-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
-  .pod-row input { background: transparent; border: none; padding: 0.2rem 0.4rem; font-size: 0.875rem; }
-  .pod-row input:focus { border-bottom: 1px solid #3b82f6; outline: none; }
+  .pod-row { flex-wrap: wrap; }
+  .pod-row input, .pod-row textarea { background: transparent; border: none; padding: 0.2rem 0.4rem; font-size: 0.875rem; }
+  .pod-row input:focus, .pod-row textarea:focus { border-bottom: 1px solid #3b82f6; outline: none; }
   .pod-name-input { width: 140px; flex-shrink: 0; color: var(--text); font-weight: 600; }
   .pod-path-input { flex: 1; color: var(--muted); font-family: monospace; font-size: 0.75rem; }
+  .pod-desc-input {
+    width: 100%; color: var(--muted); font-size: 0.75rem; resize: none;
+    margin-top: 0.25rem; padding-left: 1.6rem; font-family: inherit;
+    min-height: 1.6em; line-height: 1.4;
+  }
+  .pod-desc-input::placeholder { color: var(--border); }
   .pod-remove-btn {
     background: none; border: none; color: var(--muted); cursor: pointer;
     font-size: 1rem; padding: 0.1rem 0.3rem; border-radius: 4px; flex-shrink: 0;
@@ -181,6 +188,16 @@
 
     <!-- Right column: Charts -->
     <div>
+      <div class="section-title">
+        <span>Tabs</span>
+      </div>
+      <div class="chart-toggles" style="margin-bottom:1.25rem">
+        <label class="chart-toggle">
+          <input type="checkbox" id="exec-summary" /> Executive Summary tab
+          <span class="toggle-note">(meeting-ready pod health overview)</span>
+        </label>
+      </div>
+
       <div class="section-title">
         <span>Overview Charts</span>
       </div>
