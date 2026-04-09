@@ -527,29 +527,29 @@ function calcWeeklyArrival(items, weeksBack = 8) {
 }
 
 function calcWeeklyThroughput(items, weeksBack = 8) {
-  const done = items.filter(i => (i.closed || i.resolved) && i.type !== 'Spike')
+  const closedItems = items.filter(i => i.closed && i.type !== 'Spike')
+  const resolvedOnly = items.filter(i => !i.closed && i.resolved && i.type !== 'Spike')
   return weekBuckets(weeksBack).map(({ start, end, label }) => {
-    let resolved = 0
     let closed = 0
-    for (const i of done) {
-      const d = new Date(i.closed || i.resolved)
-      if (d >= start && d <= end) {
-        if (i.closed) closed++
-        else resolved++
-      }
+    let resolved = 0
+    for (const i of closedItems) {
+      if (new Date(i.closed) >= start && new Date(i.closed) <= end) closed++
     }
-    return { label, count: resolved + closed, resolved, closed }
+    for (const i of resolvedOnly) {
+      if (new Date(i.resolved) >= start && new Date(i.resolved) <= end) resolved++
+    }
+    return { label, count: closed, closed, resolved }
   })
 }
 
 function calcWeeklyThroughputPerPerson(items, weeksBack = 8) {
-  const done = items.filter(i => (i.closed || i.resolved) && i.assignee && i.type !== 'Spike')
+  const done = items.filter(i => i.closed && i.assignee && i.type !== 'Spike')
   const buckets = weekBuckets(weeksBack)
   return buckets.map(({ start, end, label }) => {
     let count = 0
     const people = new Set()
     for (const item of done) {
-      const d = new Date(item.closed || item.resolved)
+      const d = new Date(item.closed)
       if (d >= start && d <= end) {
         count++
         people.add(item.assignee)
@@ -744,10 +744,10 @@ function calcStaleItems(items, staleDays = 2) {
 // ─── Bug Ratio Trend: bugs as % of throughput per week ───────────────────────
 
 function calcBugRatioTrend(items, weeksBack = 8) {
-  const done = items.filter(i => (i.closed || i.resolved) && i.type !== 'Spike');
+  const done = items.filter(i => i.closed && i.type !== 'Spike');
   return weekBuckets(weeksBack).map(({ start, end, label }) => {
     const weekItems = done.filter(i => {
-      const d = new Date(i.closed || i.resolved);
+      const d = new Date(i.closed);
       return d >= start && d <= end;
     });
     const total = weekItems.length;
@@ -776,6 +776,98 @@ function calcThroughputPredictability(items, weeksBack = 8) {
     ratingColor: cv <= 0.3 ? '#22c55e' : cv <= 0.6 ? '#f59e0b' : '#ef4444',
     weekly
   };
+}
+
+// ─── Predictions: throughput forecast, backlog drain, net flow ──────────────
+
+const PREDICTION_MIN_WEEKS = 4
+
+function calcPredictions(items, weeksBack = 8) {
+  const throughput = calcWeeklyThroughput(items, weeksBack)
+  const arrivals = calcWeeklyArrival(items, weeksBack)
+
+  // Count weeks with any activity (non-zero throughput OR arrivals)
+  const weeksWithData = throughput.filter((w, i) => w.count > 0 || arrivals[i].count > 0).length
+
+  if (weeksWithData < PREDICTION_MIN_WEEKS) {
+    return {
+      ready: false,
+      weeksCollected: weeksWithData,
+      weeksNeeded: PREDICTION_MIN_WEEKS,
+      weeksUntilReady: PREDICTION_MIN_WEEKS - weeksWithData
+    }
+  }
+
+  const tpCounts = throughput.map(w => w.count).sort((a, b) => a - b)
+  const arrCounts = arrivals.map(w => w.count).sort((a, b) => a - b)
+
+  function percentile(sorted, p) {
+    const idx = (p / 100) * (sorted.length - 1)
+    const lo = Math.floor(idx)
+    const hi = Math.ceil(idx)
+    if (lo === hi) return sorted[lo]
+    return sorted[lo] + (sorted[hi] - sorted[lo]) * (idx - lo)
+  }
+
+  // Throughput forecast — pessimistic (25th), likely (50th), optimistic (75th)
+  const tpP25 = percentile(tpCounts, 25)
+  const tpP50 = percentile(tpCounts, 50)
+  const tpP75 = percentile(tpCounts, 75)
+
+  // Net flow (arrivals minus throughput) — positive means WIP growing
+  const arrP50 = percentile(arrCounts, 50)
+  const netPerWeek = arrP50 - tpP50
+
+  // Arrival forecast percentiles (for drain calc)
+  const arrP25 = percentile(arrCounts, 25)
+  const arrP75 = percentile(arrCounts, 75)
+
+  // Active backlog
+  const active = items.filter(i => !['Closed', 'Removed', 'Resolved'].includes(i.state))
+  const backlogSize = active.length
+
+  // Backlog drain accounting for new arrivals: drain rate = throughput − arrivals
+  // Optimistic: high throughput (75th) minus low arrivals (25th)
+  // Pessimistic: low throughput (25th) minus high arrivals (75th)
+  const netDrainOptimistic = tpP75 - arrP25
+  const netDrainLikely = tpP50 - arrP50
+  const netDrainPessimistic = tpP25 - arrP75
+
+  function drainTime(netRate) {
+    if (netRate <= 0) return null // not draining — arrivals match or exceed throughput
+    return backlogSize / netRate
+  }
+
+  const drainOptWeeks = drainTime(netDrainOptimistic)
+  const drainLikelyWeeks = drainTime(netDrainLikely)
+  const drainPessWeeks = drainTime(netDrainPessimistic)
+  const draining = netDrainLikely > 0
+
+  // Timeframe forecasts: how many items completed in next 2 and 4 weeks
+  const forecast2wk = { pessimistic: +(tpP25 * 2).toFixed(0), likely: +(tpP50 * 2).toFixed(0), optimistic: +(tpP75 * 2).toFixed(0) }
+  const forecast4wk = { pessimistic: +(tpP25 * 4).toFixed(0), likely: +(tpP50 * 4).toFixed(0), optimistic: +(tpP75 * 4).toFixed(0) }
+
+  return {
+    ready: true,
+    weeksCollected: weeksWithData,
+    throughput: {
+      pessimistic: +tpP25.toFixed(1),
+      likely: +tpP50.toFixed(1),
+      optimistic: +tpP75.toFixed(1)
+    },
+    netFlow: {
+      perWeek: +netPerWeek.toFixed(1),
+      direction: netPerWeek > 0.5 ? 'growing' : netPerWeek < -0.5 ? 'shrinking' : 'stable'
+    },
+    backlogDrain: {
+      backlogSize,
+      draining,
+      optimisticWeeks: drainOptWeeks !== null ? +drainOptWeeks.toFixed(1) : null,
+      likelyWeeks: drainLikelyWeeks !== null ? +drainLikelyWeeks.toFixed(1) : null,
+      pessimisticWeeks: drainPessWeeks !== null ? +drainPessWeeks.toFixed(1) : null
+    },
+    forecast: { twoWeeks: forecast2wk, fourWeeks: forecast4wk }
+  }
 }
 
 function arrivalStats(items) {
@@ -1324,8 +1416,8 @@ function renderBarChart(container, datasets, opts = {}) {
 
   // For stacked bars, max is the sum of all datasets per bucket
   const maxVal = stacked
-    ? Math.max(1, ...datasets[0].data.map((_, i) => datasets.reduce((s, ds) => s + ds.data[i].count, 0)))
-    : Math.max(1, ...datasets.flatMap(ds => ds.data.map(d => d.count)));
+    ? Math.max(1, ...datasets[0].data.map((_, i) => datasets.reduce((s, ds) => s + (ds.data[i].count || 0), 0)))
+    : Math.max(1, ...datasets.flatMap(ds => ds.data.map(d => d.count || 0)));
   const labels = datasets[0].data.map(d => d.label);
   const n = labels.length;
   const ds = datasets.length;
@@ -1347,10 +1439,10 @@ function renderBarChart(container, datasets, opts = {}) {
     for (let i = 0; i < n; i++) {
       const x = PAD.left + i * groupW + 4
       let cumY = PAD.top + chartH
-      const total = datasets.reduce((s, ds_item) => s + ds_item.data[i].count, 0)
+      const total = datasets.reduce((s, ds_item) => s + (ds_item.data[i].count || 0), 0)
       // Draw from bottom up
       datasets.forEach(ds_item => {
-        const val = ds_item.data[i].count
+        const val = ds_item.data[i].count || 0
         if (val <= 0) return
         const barH = (val / maxVal) * chartH
         cumY -= barH

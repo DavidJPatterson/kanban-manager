@@ -406,6 +406,36 @@
   .exec-pred-badge[data-rating="moderate"] { background: rgba(245,158,11,.12); color: #f59e0b; }
   .exec-pred-badge[data-rating="volatile"] { background: rgba(239,68,68,.12); color: #ef4444; }
   .exec-pred-sub { font-size: .75rem; color: var(--muted); }
+
+  /* Predictions section */
+  .exec-predictions { margin: .6rem 0; }
+  .exec-predictions.pending { opacity: .8; }
+  .exec-pred-heading { font-size: .82rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin-bottom: .4rem; }
+  .exec-pred-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: .5rem; }
+  .exec-pred-card { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: .5rem .6rem; }
+  .exec-pred-label { font-size: .72rem; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin-bottom: .3rem; }
+  .exec-pred-row { display: flex; gap: .6rem; justify-content: center; }
+  .exec-pred-val { text-align: center; }
+  .exec-pred-num { font-size: 1.2rem; font-weight: 700; line-height: 1.2; }
+  .exec-pred-footnote { font-size: .65rem; color: var(--muted); text-align: center; margin-top: .25rem; }
+  .exec-pred-backlog-count { font-size: .75rem; color: var(--muted); text-align: center; margin-bottom: .15rem; }
+  .exec-pred-net { text-align: center; }
+  .exec-pred-net-val { font-size: 1.7rem; font-weight: 700; line-height: 1.2; }
+  .exec-pred-net-label { font-size: .75rem; font-weight: 600; }
+  .exec-pred-net-context { font-size: .65rem; color: var(--muted); margin-top: .2rem; font-style: italic; }
+  .exec-pred-coverage { font-size: .7rem; color: #f59e0b; text-align: center; margin-top: .3rem; }
+  .exec-pred-disclaimer { font-size: .65rem; color: var(--muted); text-align: center; margin-top: .2rem; font-style: italic; }
+  .exec-pred-pending { text-align: center; padding: .5rem; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; }
+  .exec-pred-pending-text { font-size: .88rem; color: #94a3b8; margin-bottom: .3rem; }
+  .exec-pred-bar-track { background: var(--surface); border-radius: 4px; height: 6px; max-width: 200px; margin: 0 auto .25rem; }
+  .exec-pred-bar-fill { background: #3b82f6; border-radius: 4px; height: 100%; transition: width .3s; }
+  .exec-pred-pending-sub { font-size: .7rem; color: var(--muted); }
+  .exec-pred-not-draining { font-size: 1.2rem; font-weight: 700; color: #ef4444; text-align: center; padding: .3rem 0; }
+  .exec-pred-forecast { display: flex; gap: .6rem; align-items: center; margin-top: .15rem; }
+  .exec-pred-fc-block { text-align: center; flex: 1; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: .4rem .5rem; }
+  .exec-pred-fc-label { font-size: .72rem; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin-bottom: .15rem; }
+  .exec-pred-fc-range { font-size: 1.1rem; font-weight: 700; }
+  .exec-pred-fc-likely { font-size: .7rem; color: #10b981; }
 </style>
 </head>
 <body>

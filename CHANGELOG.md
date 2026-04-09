@@ -4,6 +4,23 @@ All notable changes to Kanban Manager are documented here.
 
 ---
 
+## [1.3.1] — 2026-04-09
+
+### Added
+
+- **Executive Summary: Predictions** — New predictions section inside the "All Pods" aggregate box and each per-pod card. Shows throughput forecast (pessimistic/likely/optimistic using 25th/50th/75th percentiles), backlog drain time (accounting for continued arrivals), net flow direction, and a delivery forecast for the next 2 and 4 weeks. Requires 4 weeks of historical data before predictions appear — until then, a progress bar shows "Predictions available in X more weeks" to avoid presenting unreliable numbers.
+- **Predictions: pod coverage note** — Aggregate predictions show how many pods have sufficient data and flag pods that aren't yet included.
+- **Predictions: pod throughput spread** — Aggregate throughput forecast shows the per-pod range (e.g. "Pod range: 2–8/wk") with a "wide spread" warning when one pod's throughput is 3x+ another's, so executives know if the aggregate is masking disparity.
+- **Predictions: not-draining state** — When arrivals meet or exceed throughput, backlog drain shows "Not draining" instead of a misleading finite estimate, with a connecting note on the net flow card: "Backlog clears only if throughput increases."
+
+### Fixed
+
+- **Throughput now counts closed items only** — All throughput metrics (weekly throughput, throughput per person, bug ratio trend, executive summary KPIs, predictions) now use closed items only, not closed + resolved. The throughput bar chart still shows resolved items as a separate stacked segment so you can see what's sitting at resolved vs actually closed.
+- **Throughput per person tooltip** — Now notes "Excludes unassigned items" to explain why its total may differ from the throughput chart.
+- **Stacked bar chart NaN guard** — `renderBarChart` now guards against undefined count values in stacked datasets, preventing SVG NaN attribute errors.
+
+---
+
 ## [1.3.0] — 2026-04-08
 
 ### Added

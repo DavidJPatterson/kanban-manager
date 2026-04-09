@@ -138,7 +138,7 @@ async function buildOverviewPanel(cachedData, sortedPods) {
           <div id="ov-arrival-chart"></div>
         </div>
         <div class="metric-chart">
-          <h3 class="chart-title">Throughput (resolved/week) <span class="chart-info">?<span class="chart-tip">Items closed or resolved per week (excludes Spikes). Compare against arrival rate — throughput should match or exceed arrivals to keep WIP stable.</span></span></h3>
+          <h3 class="chart-title">Throughput (closed/week) <span class="chart-info">?<span class="chart-tip">Items closed per week (excludes Spikes). Compare against arrival rate — throughput should match or exceed arrivals to keep WIP stable.</span></span></h3>
           <div class="metric-kpis" id="ov-tp-kpis"></div>
           <div id="ov-throughput-chart"></div>
         </div>
@@ -209,8 +209,8 @@ async function buildOverviewPanel(cachedData, sortedPods) {
     <div class="kpi kpi-center"><span class="trend-badge ${tpDiff>0?'trend-up-good':tpDiff<0?'trend-up-bad':'trend-neutral'}">${tpDiff>0?`↑${tpDiff}`:tpDiff<0?`↓${Math.abs(tpDiff)}`:'→'} vs prev</span></div>
   `;
   renderBarChart(panel.querySelector('#ov-throughput-chart'), [
-    { label: 'Closed', color: '#10b981', data: throughput.map(w => ({ label: w.label, count: w.closed })) },
-    { label: 'Resolved', color: '#60a5fa', data: throughput.map(w => ({ label: w.label, count: w.resolved })) }
+    { label: 'Closed', color: '#10b981', data: throughput.map(w => ({ label: w.label, count: w.closed || 0 })) },
+    { label: 'Resolved', color: '#60a5fa', data: throughput.map(w => ({ label: w.label, count: w.resolved || 0 })) }
   ], { width: 500, height: 140, stacked: true, avgLine: { value: +tpAvg, label: 'avg', color: '#10b981' } });
 
   // Per-pod flow charts — one arrival + throughput chart per pod
@@ -275,8 +275,8 @@ async function buildOverviewPanel(cachedData, sortedPods) {
       { label: 'Arrived', color, data: pArrival }
     ], { width: 420, height: 110, avgLine: { value: +pStats.avgPerWeek, label: 'avg', color } });
     renderBarChart(block.querySelector(`.pod-tp-chart-${pod.id}`), [
-      { label: 'Closed', color: '#10b981', data: pThroughput.map(w => ({ label: w.label, count: w.closed })) },
-      { label: 'Resolved', color: '#60a5fa', data: pThroughput.map(w => ({ label: w.label, count: w.resolved })) }
+      { label: 'Closed', color: '#10b981', data: pThroughput.map(w => ({ label: w.label, count: w.closed || 0 })) },
+      { label: 'Resolved', color: '#60a5fa', data: pThroughput.map(w => ({ label: w.label, count: w.resolved || 0 })) }
     ], { width: 420, height: 110, stacked: true, avgLine: { value: pTpAvg, label: 'avg', color: '#10b981' } });
   });
 
@@ -294,7 +294,7 @@ async function buildOverviewPanel(cachedData, sortedPods) {
   if (oc.throughputByPerson) {
     const div = document.createElement('div')
     div.className = 'metric-chart'
-    div.innerHTML = tip('Throughput per Person', 'Weekly items completed divided by the number of people who closed items that week. Shows average output per contributor.') + '<div class="tp-person-chart"></div>'
+    div.innerHTML = tip('Throughput per Person', 'Weekly items closed divided by the number of people who closed items that week. Shows average output per contributor. Excludes unassigned items — totals may differ from the throughput chart.') + '<div class="tp-person-chart"></div>'
     chartsGrid.appendChild(div)
     const tpPerPerson = calcWeeklyThroughputPerPerson(allItems, 8)
     renderThroughputPerPersonChart(div.querySelector('.tp-person-chart'), tpPerPerson, { width: 500, height: 150 })
@@ -712,6 +712,101 @@ async function buildOverviewPanel(cachedData, sortedPods) {
   }
 }
 
+// ─── Prediction rendering for Executive Summary ──────────────────────────────
+
+function renderExecPredictions(pred, heading, coverageNote, podSpread) {
+  if (!pred.ready) {
+    const bar = pred.weeksNeeded > 0 ? Math.round((pred.weeksCollected / pred.weeksNeeded) * 100) : 0
+    return `
+      <div class="exec-predictions pending">
+        ${heading ? `<div class="exec-pred-heading">${escHtml(heading)} — Predictions</div>` : ''}
+        <div class="exec-pred-pending">
+          <div class="exec-pred-pending-text">Predictions available in ${pred.weeksUntilReady} more week${pred.weeksUntilReady === 1 ? '' : 's'}</div>
+          <div class="exec-pred-bar-track"><div class="exec-pred-bar-fill" style="width:${bar}%"></div></div>
+          <div class="exec-pred-pending-sub">${pred.weeksCollected} of ${pred.weeksNeeded} weeks collected</div>
+        </div>
+      </div>
+    `
+  }
+
+  const tp = pred.throughput
+  const nf = pred.netFlow
+  const bd = pred.backlogDrain
+  const fc = pred.forecast
+  const nfColor = nf.direction === 'growing' ? 'var(--red)' : nf.direction === 'shrinking' ? 'var(--green)' : 'var(--muted)'
+  const nfIcon = nf.direction === 'growing' ? '↑' : nf.direction === 'shrinking' ? '↓' : '→'
+  const nfLabel = nf.direction === 'growing' ? 'WIP growing' : nf.direction === 'shrinking' ? 'WIP shrinking' : 'WIP stable'
+
+  function fmtWks(w) {
+    if (w === null) return 'Not draining'
+    if (w < 1) return '< 1 wk'
+    return w.toFixed(1) + ' wks'
+  }
+
+  const drainColor = (w) => w === null ? '#ef4444' : '#94a3b8'
+
+  // Pod spread footnote for aggregate view
+  const spreadNote = podSpread
+    ? `<div class="exec-pred-footnote">Pod range: ${podSpread.min}–${podSpread.max}/wk${podSpread.max > podSpread.min * 3 ? ' <span style="color:#f59e0b">· wide spread</span>' : ''}</div>`
+    : ''
+
+  return `
+    <div class="exec-predictions">
+      ${heading ? `<div class="exec-pred-heading">${escHtml(heading)} — Predictions</div>` : '<div class="exec-pred-heading">Predictions</div>'}
+      <div class="exec-pred-grid">
+        <div class="exec-pred-card">
+          <div class="exec-pred-label">Throughput Forecast /wk</div>
+          <div class="exec-pred-row">
+            <div class="exec-pred-val"><div class="exec-pred-num" style="color:#ef4444">${tp.pessimistic}</div><div class="exec-pred-sub">pessimistic</div></div>
+            <div class="exec-pred-val"><div class="exec-pred-num" style="color:#10b981">${tp.likely}</div><div class="exec-pred-sub">likely</div></div>
+            <div class="exec-pred-val"><div class="exec-pred-num" style="color:#3b82f6">${tp.optimistic}</div><div class="exec-pred-sub">optimistic</div></div>
+          </div>
+          <div class="exec-pred-footnote">25th / 50th / 75th percentile</div>
+          ${spreadNote}
+        </div>
+        <div class="exec-pred-card">
+          <div class="exec-pred-label">Backlog Drain</div>
+          <div class="exec-pred-backlog-count">${bd.backlogSize} active items</div>
+          ${bd.draining ? `
+            <div class="exec-pred-row">
+              <div class="exec-pred-val"><div class="exec-pred-num" style="color:#ef4444">${fmtWks(bd.pessimisticWeeks)}</div><div class="exec-pred-sub">pessimistic</div></div>
+              <div class="exec-pred-val"><div class="exec-pred-num" style="color:#10b981">${fmtWks(bd.likelyWeeks)}</div><div class="exec-pred-sub">likely</div></div>
+              <div class="exec-pred-val"><div class="exec-pred-num" style="color:#3b82f6">${fmtWks(bd.optimisticWeeks)}</div><div class="exec-pred-sub">optimistic</div></div>
+            </div>
+            <div class="exec-pred-footnote">accounting for continued arrivals</div>
+          ` : `
+            <div class="exec-pred-not-draining">Not draining</div>
+            <div class="exec-pred-footnote">arrivals meet or exceed throughput — backlog will not clear at current rates</div>
+          `}
+        </div>
+        <div class="exec-pred-card">
+          <div class="exec-pred-label">Net Flow</div>
+          <div class="exec-pred-net">
+            <div class="exec-pred-net-val" style="color:${nfColor}">${nfIcon} ${Math.abs(nf.perWeek)}</div>
+            <div class="exec-pred-net-label" style="color:${nfColor}">${nfLabel}</div>
+            <div class="exec-pred-sub">items/wk (arrivals − throughput)</div>
+            ${!bd.draining ? '<div class="exec-pred-net-context">Backlog clears only if throughput increases</div>' : ''}
+          </div>
+        </div>
+      </div>
+      <div class="exec-pred-forecast">
+        <div class="exec-pred-fc-block">
+          <div class="exec-pred-fc-label">Next 2 weeks</div>
+          <div class="exec-pred-fc-range"><span style="color:#ef4444">${fc.twoWeeks.pessimistic}</span> – <span style="color:#3b82f6">${fc.twoWeeks.optimistic}</span> items</div>
+          <div class="exec-pred-fc-likely">likely ${fc.twoWeeks.likely}</div>
+        </div>
+        <div class="exec-pred-fc-block">
+          <div class="exec-pred-fc-label">Next 4 weeks</div>
+          <div class="exec-pred-fc-range"><span style="color:#ef4444">${fc.fourWeeks.pessimistic}</span> – <span style="color:#3b82f6">${fc.fourWeeks.optimistic}</span> items</div>
+          <div class="exec-pred-fc-likely">likely ${fc.fourWeeks.likely}</div>
+        </div>
+      </div>
+      ${coverageNote ? `<div class="exec-pred-coverage">${escHtml(coverageNote)}</div>` : ''}
+      <div class="exec-pred-disclaimer">Projections based on ${pred.weeksCollected}-week rolling trends — not a commitment</div>
+    </div>
+  `
+}
+
 // ─── Executive Summary panel ─────────────────────────────────────────────────
 
 async function buildExecutiveSummaryPanel(cachedData, settings, sortedPods) {
@@ -787,11 +882,11 @@ async function buildExecutiveSummaryPanel(cachedData, settings, sortedPods) {
     }
     return { bugs, stories }
   })() : { bugs: 0, stories: 0 }
-  const tpDone = allItems.filter(i => (i.closed || i.resolved) && i.type !== 'Spike')
+  const tpDone = allItems.filter(i => i.closed && i.type !== 'Spike')
   const tpSplit = lastWeekBucket ? (() => {
     let bugs = 0, stories = 0
     for (const i of tpDone) {
-      const d = new Date(i.closed || i.resolved)
+      const d = new Date(i.closed)
       if (d >= lastWeekBucket.start && d <= lastWeekBucket.end) {
         if (i.type === 'Bug') bugs++
         else if (i.type === 'User Story') stories++
@@ -816,7 +911,7 @@ async function buildExecutiveSummaryPanel(cachedData, settings, sortedPods) {
   const tpSplitThisWk = thisWeekBucket ? (() => {
     let bugs = 0, stories = 0
     for (const i of tpDone) {
-      const d = new Date(i.closed || i.resolved)
+      const d = new Date(i.closed)
       if (d >= thisWeekBucket.start && d <= thisWeekBucket.end) {
         if (i.type === 'Bug') bugs++
         else if (i.type === 'User Story') stories++
@@ -890,8 +985,38 @@ async function buildExecutiveSummaryPanel(cachedData, settings, sortedPods) {
           ).join(' ')}</div>
         </div>
       </div>
-    </div>
   `
+
+  // Aggregate predictions — inside the All Pods box, before closing exec-aggregate
+  // Check which pods have enough data for predictions
+  const podPredStatus = pods.map(pod => ({
+    name: pod.name,
+    ready: calcPredictions(pod.items || [], 8).ready
+  }))
+  const podsReady = podPredStatus.filter(p => p.ready)
+  const podsNotReady = podPredStatus.filter(p => !p.ready)
+
+  const aggPred = calcPredictions(allItems, 8)
+  let podCoverageNote = ''
+  if (podsNotReady.length > 0 && podsReady.length > 0) {
+    podCoverageNote = `Based on ${podsReady.length} of ${pods.length} pods (${podsNotReady.length} pod${podsNotReady.length === 1 ? '' : 's'} need more history)`
+  } else if (podsNotReady.length > 0 && podsReady.length === 0) {
+    podCoverageNote = `No pods have sufficient history yet`
+  }
+
+  // Per-pod throughput spread for aggregate context (#2)
+  const podTpMedians = podsReady.map(ps => {
+    const pod = pods.find(p => p.name === ps.name)
+    if (!pod) return null
+    const pred = calcPredictions(pod.items || [], 8)
+    return pred.ready ? pred.throughput.likely : null
+  }).filter(v => v !== null)
+  const podSpread = podTpMedians.length >= 2
+    ? { min: Math.min(...podTpMedians), max: Math.max(...podTpMedians) }
+    : null
+
+  html += renderExecPredictions(aggPred, null, podCoverageNote, podSpread)
+  html += '</div>'
 
   // Aggregate insights (if any)
   if (aggInsights.length) {
@@ -1052,6 +1177,10 @@ async function buildExecutiveSummaryPanel(cachedData, settings, sortedPods) {
         </div>
       `
     }
+
+    // Pod predictions
+    const podPred = calcPredictions(pItems, 8)
+    html += renderExecPredictions(podPred)
 
     // Notes
     html += `
@@ -1426,8 +1555,8 @@ function buildPodPanel(pod) {
   // Render charts
   renderBarChart(panel.querySelector('.pod-arrival-chart'), [{ label:'Items arrived', color:'#6366f1', data:arrival }], { width:500, height:120, avgLine: { value: +stats.avgPerWeek, label: 'avg', color: '#60a5fa' } });
   renderBarChart(panel.querySelector('.pod-throughput-chart'), [
-    { label: 'Closed', color: '#10b981', data: throughput.map(w => ({ label: w.label, count: w.closed })) },
-    { label: 'Resolved', color: '#60a5fa', data: throughput.map(w => ({ label: w.label, count: w.resolved })) }
+    { label: 'Closed', color: '#10b981', data: throughput.map(w => ({ label: w.label, count: w.closed || 0 })) },
+    { label: 'Resolved', color: '#60a5fa', data: throughput.map(w => ({ label: w.label, count: w.resolved || 0 })) }
   ], { width: 500, height: 120, stacked: true, avgLine: { value: +tpAvgPod, label: 'avg', color: '#10b981' } });
 }
 

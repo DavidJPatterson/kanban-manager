@@ -126,15 +126,17 @@ test('returns zero counts for empty items', () => {
 
 group('calcWeeklyThroughput')
 
-test('counts closed and resolved items', () => {
+test('count only includes closed items, resolved tracked separately', () => {
   const items = [
     makeItem({ closed: daysAgo(1) }),
-    makeItem({ closed: null, resolved: daysAgo(2) }),
+    makeItem({ closed: null, resolved: daysAgo(2) }), // resolved only — not in count
     makeItem({ closed: null, resolved: null }) // active — not counted
   ]
   const result = calcWeeklyThroughput(items, 4)
-  const total = result.reduce((s, w) => s + w.count, 0)
-  assertEqual(total, 2)
+  const totalCount = result.reduce((s, w) => s + w.count, 0)
+  const totalResolved = result.reduce((s, w) => s + w.resolved, 0)
+  assertEqual(totalCount, 1, 'count should only include closed items')
+  assertEqual(totalResolved, 1, 'resolved should track resolved-only items')
 })
 
 test('excludes Spikes from throughput', () => {
