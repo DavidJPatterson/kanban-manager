@@ -516,6 +516,33 @@ function fmtWeek(date) {
   return date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
 }
 
+/**
+ * Count weekdays (Mon–Fri) in the overlap between a date range and a reference range.
+ * @param {string|Date} holStart - start of the period (e.g. holiday start)
+ * @param {string|Date} holEnd - end of the period (inclusive)
+ * @param {Date} rangeStart - start of the reference window
+ * @param {Date} rangeEnd - end of the reference window
+ * @returns {number} weekday count in the overlap
+ */
+function countWeekdayOverlap(holStart, holEnd, rangeStart, rangeEnd) {
+  const hs = new Date(holStart)
+  hs.setHours(0, 0, 0, 0)
+  const he = new Date(holEnd)
+  he.setHours(23, 59, 59, 999)
+  const s = new Date(Math.max(hs.getTime(), rangeStart.getTime()))
+  const e = new Date(Math.min(he.getTime(), rangeEnd.getTime()))
+  if (s > e) return 0
+  let count = 0
+  const d = new Date(s)
+  d.setHours(0, 0, 0, 0)
+  while (d <= e) {
+    const dow = d.getDay()
+    if (dow > 0 && dow < 6) count++
+    d.setDate(d.getDate() + 1)
+  }
+  return count
+}
+
 function calcWeeklyArrival(items, weeksBack = 8) {
   return weekBuckets(weeksBack).map(({ start, end, label }) => ({
     label,
@@ -780,9 +807,77 @@ function calcThroughputPredictability(items, weeksBack = 8) {
 
 // ─── Predictions: throughput forecast, backlog drain, net flow ──────────────
 
+/**
+ * Build capacity context for predictions — maps historical and future weeks
+ * to capacity ratios based on team holiday data. Assumes Mon–Fri working week.
+ * A single person off one day on a 5-person team = 1/25 capacity loss, not a wipe-out.
+ * @param {Object} holidays - teamHolidays data from storage
+ * @param {string|string[]} podIds - pod ID(s) to include (array for aggregate)
+ * @param {number} [weeksBack=8] - historical weeks (aligned with weekBuckets)
+ * @param {number} [futureWeeks=4] - future weeks to forecast
+ * @returns {Object|null} { historical, future, memberCount } or null if no member data
+ */
+function calcCapacityContext(holidays, podIds, weeksBack = 8, futureWeeks = 4) {
+  const ids = Array.isArray(podIds) ? podIds : [podIds]
+  const allMembers = []
+  for (const podId of ids) {
+    const podHols = holidays?.[podId] || {}
+    const memberIds = Object.keys(podHols).filter(k => k !== '_podPaused')
+    for (const mid of memberIds) allMembers.push(podHols[mid])
+  }
+  const memberCount = allMembers.length
+  if (memberCount === 0) return null
+
+  function weekInfo(weekStart, weekEnd) {
+    const totalPersonDays = memberCount * 5
+    let daysOff = 0
+    const offMembers = []
+    for (const m of allMembers) {
+      const mDays = (m.holidays || []).reduce((s, h) => {
+        if (!h.start || !h.end) return s
+        return s + countWeekdayOverlap(h.start, h.end, weekStart, weekEnd)
+      }, 0)
+      if (mDays > 0) {
+        daysOff += mDays
+        offMembers.push({ name: m.name, days: mDays })
+      }
+    }
+    return {
+      ratio: Math.max(0, (totalPersonDays - daysOff) / totalPersonDays),
+      daysOff,
+      totalPersonDays,
+      offMembers
+    }
+  }
+
+  // Historical capacity aligned with throughput week buckets
+  const buckets = weekBuckets(weeksBack)
+  const historical = buckets.map(b => weekInfo(b.start, b.end).ratio)
+
+  // Future capacity (starting from THIS Monday — current week counts because
+  // holidays this week still affect output in the "next N weeks" window)
+  const now = new Date()
+  const daysToMonday = (now.getDay() + 6) % 7
+  const thisMonday = new Date(now)
+  thisMonday.setDate(now.getDate() - daysToMonday)
+  thisMonday.setHours(0, 0, 0, 0)
+
+  const future = []
+  for (let w = 0; w < futureWeeks; w++) {
+    const start = new Date(thisMonday)
+    start.setDate(thisMonday.getDate() + w * 7)
+    const end = new Date(start)
+    end.setDate(start.getDate() + 6)
+    end.setHours(23, 59, 59, 999)
+    future.push(weekInfo(start, end))
+  }
+
+  return { historical, future, memberCount }
+}
+
 const PREDICTION_MIN_WEEKS = 4
 
-function calcPredictions(items, weeksBack = 8) {
+function calcPredictions(items, weeksBack = 8, capacityCtx = null) {
   const throughput = calcWeeklyThroughput(items, weeksBack)
   const arrivals = calcWeeklyArrival(items, weeksBack)
 
@@ -798,7 +893,22 @@ function calcPredictions(items, weeksBack = 8) {
     }
   }
 
-  const tpCounts = throughput.map(w => w.count).sort((a, b) => a - b)
+  // Normalize throughput by capacity — scale up holiday weeks to reflect
+  // full-capacity baseline so they don't drag down percentiles.
+  // Weeks with <20% capacity are excluded (too sparse to normalize reliably).
+  let tpCounts
+  if (capacityCtx?.historical) {
+    tpCounts = []
+    for (let i = 0; i < throughput.length; i++) {
+      const ratio = capacityCtx.historical[i]
+      if (ratio < 0.2) continue
+      tpCounts.push(ratio < 0.95 ? +(throughput[i].count / ratio).toFixed(1) : throughput[i].count)
+    }
+    if (tpCounts.length === 0) tpCounts = throughput.map(w => w.count)
+  } else {
+    tpCounts = throughput.map(w => w.count)
+  }
+  tpCounts.sort((a, b) => a - b)
   const arrCounts = arrivals.map(w => w.count).sort((a, b) => a - b)
 
   function percentile(sorted, p) {
@@ -843,9 +953,13 @@ function calcPredictions(items, weeksBack = 8) {
   const drainPessWeeks = drainTime(netDrainPessimistic)
   const draining = netDrainLikely > 0
 
-  // Timeframe forecasts: how many items completed in next 2 and 4 weeks
-  const forecast2wk = { pessimistic: +(tpP25 * 2).toFixed(0), likely: +(tpP50 * 2).toFixed(0), optimistic: +(tpP75 * 2).toFixed(0) }
-  const forecast4wk = { pessimistic: +(tpP25 * 4).toFixed(0), likely: +(tpP50 * 4).toFixed(0), optimistic: +(tpP75 * 4).toFixed(0) }
+  // Timeframe forecasts — scale by upcoming capacity if holiday data available.
+  // Mon–Fri week: 1 person off 1 day on a 5-person team = ratio 0.96, not 0.
+  const fut = capacityCtx?.future
+  const cap2 = fut?.length >= 2 ? fut[0].ratio + fut[1].ratio : 2
+  const cap4 = fut?.length >= 4 ? cap2 + fut[2].ratio + fut[3].ratio : 4
+  const forecast2wk = { pessimistic: +(tpP25 * cap2).toFixed(0), likely: +(tpP50 * cap2).toFixed(0), optimistic: +(tpP75 * cap2).toFixed(0) }
+  const forecast4wk = { pessimistic: +(tpP25 * cap4).toFixed(0), likely: +(tpP50 * cap4).toFixed(0), optimistic: +(tpP75 * cap4).toFixed(0) }
 
   return {
     ready: true,
@@ -866,7 +980,11 @@ function calcPredictions(items, weeksBack = 8) {
       likelyWeeks: drainLikelyWeeks !== null ? +drainLikelyWeeks.toFixed(1) : null,
       pessimisticWeeks: drainPessWeeks !== null ? +drainPessWeeks.toFixed(1) : null
     },
-    forecast: { twoWeeks: forecast2wk, fourWeeks: forecast4wk }
+    forecast: { twoWeeks: forecast2wk, fourWeeks: forecast4wk },
+    capacity: capacityCtx ? {
+      memberCount: capacityCtx.memberCount,
+      future: capacityCtx.future
+    } : null
   }
 }
 

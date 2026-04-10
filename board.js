@@ -155,7 +155,7 @@ async function buildOverviewPanel(cachedData, sortedPods) {
     const pTriage = colCount(pCols, 'Triage', 'Intake');
     const pWip    = colCount(pCols, 'In Progress', 'Active') + colCount(pCols, 'Code Review', 'Review');
     const pRelease= colCount(pCols, 'Ready');
-    const pAged   = pActive.filter(x => ageDays(x) >= 90).length;
+    const pAged   = pActive.filter(x => ageDays(x) >= 7).length;
     const pStats  = arrivalStats(pod.items || []);
     const color   = podColor(pod.id);
     const pDiff   = pStats.last7 - pStats.prev7;
@@ -170,7 +170,7 @@ async function buildOverviewPanel(cachedData, sortedPods) {
         <div class="pod-stat"><div class="ps-label">Triage</div><div class="ps-val kv-triage">${pTriage}</div></div>
         <div class="pod-stat"><div class="ps-label">WIP</div><div class="ps-val kv-wip">${pWip}</div></div>
         <div class="pod-stat"><div class="ps-label">Ready</div><div class="ps-val kv-throughput">${pRelease}</div></div>
-        <div class="pod-stat"><div class="ps-label">Aged >90d</div><div class="ps-val kv-aged">${pAged}</div></div>
+        <div class="pod-stat"><div class="ps-label">Aged >7d</div><div class="ps-val kv-aged">${pAged}</div></div>
       </div>
       <div class="pod-card-footer">
         <span class="pod-arr">↑${pStats.last7} this wk &nbsp;${pTrend} vs prev &nbsp;·&nbsp; avg ${pStats.avgPerWeek}/wk</span>
@@ -733,7 +733,7 @@ function renderExecPredictions(pred, heading, coverageNote, podSpread) {
   const nf = pred.netFlow
   const bd = pred.backlogDrain
   const fc = pred.forecast
-  const nfColor = nf.direction === 'growing' ? 'var(--red)' : nf.direction === 'shrinking' ? 'var(--green)' : 'var(--muted)'
+  const nfColor = nf.direction === 'growing' ? '#ef4444' : nf.direction === 'shrinking' ? '#22c55e' : 'var(--muted)'
   const nfIcon = nf.direction === 'growing' ? '↑' : nf.direction === 'shrinking' ? '↓' : '→'
   const nfLabel = nf.direction === 'growing' ? 'WIP growing' : nf.direction === 'shrinking' ? 'WIP shrinking' : 'WIP stable'
 
@@ -744,6 +744,26 @@ function renderExecPredictions(pred, heading, coverageNote, podSpread) {
   }
 
   const drainColor = (w) => w === null ? '#ef4444' : '#94a3b8'
+
+  // Capacity note for forecast blocks — aggregate shows count only, pods show names
+  function capNote(cap, fromWeek, toWeek, aggregate) {
+    if (!cap?.future) return ''
+    const weeks = cap.future.slice(fromWeek, toWeek)
+    const allOff = weeks.flatMap(w => w.offMembers)
+    const totalDaysOff = allOff.reduce((s, m) => s + m.days, 0)
+    if (totalDaysOff === 0) return ''
+    const totalPersonDays = cap.memberCount * 5 * weeks.length
+    const pct = Math.round((1 - totalDaysOff / totalPersonDays) * 100)
+    // Deduplicate members, sum their days across the period
+    const byName = {}
+    for (const m of allOff) byName[m.name] = (byName[m.name] || 0) + m.days
+    const uniqueCount = Object.keys(byName).length
+    if (aggregate) {
+      return `<div class="exec-pred-fc-capacity">${totalDaysOff} person-days off (${uniqueCount} people) · ${pct}% capacity</div>`
+    }
+    const names = Object.entries(byName).map(([name, days]) => `${name.split(' ')[0]} (${days}d)`).join(', ')
+    return `<div class="exec-pred-fc-capacity">${names} off · ${pct}% capacity</div>`
+  }
 
   // Pod spread footnote for aggregate view
   const spreadNote = podSpread
@@ -794,11 +814,13 @@ function renderExecPredictions(pred, heading, coverageNote, podSpread) {
           <div class="exec-pred-fc-label">Next 2 weeks</div>
           <div class="exec-pred-fc-range"><span style="color:#ef4444">${fc.twoWeeks.pessimistic}</span> – <span style="color:#3b82f6">${fc.twoWeeks.optimistic}</span> items</div>
           <div class="exec-pred-fc-likely">likely ${fc.twoWeeks.likely}</div>
+          ${capNote(pred.capacity, 0, 2, !heading)}
         </div>
         <div class="exec-pred-fc-block">
           <div class="exec-pred-fc-label">Next 4 weeks</div>
           <div class="exec-pred-fc-range"><span style="color:#ef4444">${fc.fourWeeks.pessimistic}</span> – <span style="color:#3b82f6">${fc.fourWeeks.optimistic}</span> items</div>
           <div class="exec-pred-fc-likely">likely ${fc.fourWeeks.likely}</div>
+          ${capNote(pred.capacity, 0, 4, !heading)}
         </div>
       </div>
       ${coverageNote ? `<div class="exec-pred-coverage">${escHtml(coverageNote)}</div>` : ''}
@@ -867,6 +889,14 @@ async function buildExecutiveSummaryPanel(cachedData, settings, sortedPods) {
   const totalWipBugs = totalWipItems.filter(i => i.type === 'Bug').length
   const totalWipStories = totalWipItems.filter(i => i.type === 'User Story').length
   const totalStale = calcStaleItems(allItems, staleDays)
+
+  // Cycle time (active → closed) — enrich all items with startedAt then compute
+  const enrichedAll = await enrichWithStartedAt(allItems, settings)
+  const allCtData = calcCycleTimes(enrichedAll)
+  const allCtValid = allCtData.filter(i => i.inProgressToClose !== null)
+  const totalCtAvg = allCtValid.length
+    ? +(allCtValid.reduce((s, i) => s + i.inProgressToClose, 0) / allCtValid.length).toFixed(1)
+    : null
 
   // Type splits for arrival & throughput (last week bucket)
   const buckets = weekBuckets(8)
@@ -956,26 +986,27 @@ async function buildExecutiveSummaryPanel(cachedData, settings, sortedPods) {
           <div class="exec-agg-val kv-arrival">${totalArrLast}</div>
           <div class="exec-agg-split">${arrSplit.bugs} bug · ${arrSplit.stories} story</div>
           ${deltaHtml(totalArrLast, totalArrPrev, false)}
-          <div class="exec-agg-live">Avg: ${totalArrAvg}/wk · This week: ${totalArrThisWeek} (${arrSplitThisWk.bugs}b ${arrSplitThisWk.stories}s)</div>
+          <div class="exec-agg-live-row"><span>Avg: ${totalArrAvg}/wk</span><span class="exec-agg-thisweek">This week: ${totalArrThisWeek} (${arrSplitThisWk.bugs}b ${arrSplitThisWk.stories}s)</span></div>
         </div>
-        <div class="exec-agg-card">
+        <div class="exec-agg-card" style="position:relative">
           <div class="exec-agg-label">Throughput</div>
           <div class="exec-agg-val kv-throughput">${totalTpLast}</div>
           <div class="exec-agg-split">${tpSplit.bugs} bug · ${tpSplit.stories} story</div>
           ${deltaHtml(totalTpLast, totalTpPrev, true)}
-          <div class="exec-agg-live">Avg: ${totalTpAvg}/wk · This week: ${totalTpThisWeek} (${tpSplitThisWk.bugs}b ${tpSplitThisWk.stories}s)</div>
+          <div class="exec-agg-live-row"><span>Avg: ${totalTpAvg}/wk</span><span class="exec-agg-thisweek">This week: ${totalTpThisWeek} (${tpSplitThisWk.bugs}b ${tpSplitThisWk.stories}s)</span></div>
+          ${totalCtAvg !== null ? `<div class="exec-agg-cycle-corner"><div class="exec-agg-cycle-val">${totalCtAvg}d</div><div class="exec-agg-cycle-label">avg cycle</div></div>` : ''}
         </div>
-        <div class="exec-agg-card">
+        <div class="exec-agg-card" style="position:relative">
           <div class="exec-agg-label">Throughput / Person</div>
           <div class="exec-agg-val kv-throughput">${totalTpPPLast}</div>
           ${deltaHtml(totalTpPPLast, totalTpPPPrev, true)}
-          <div class="exec-agg-live">Avg: ${totalTpPPAvg}/wk</div>
+          <div class="exec-agg-corner-stat"><div class="exec-agg-corner-val">${totalTpPPAvg}</div><div class="exec-agg-corner-label">avg /wk</div></div>
         </div>
-        <div class="exec-agg-card">
+        <div class="exec-agg-card" style="position:relative">
           <div class="exec-agg-label">Active WIP</div>
           <div class="exec-agg-val kv-wip">${totalWip}</div>
           <div class="exec-agg-split">${totalWipBugs} bug · ${totalWipStories} story</div>
-          <div class="exec-agg-live">${totalActive.length - totalWip} in backlog (${totalActive.filter(i => i.type === 'Bug').length - totalWipBugs}b ${totalActive.filter(i => i.type === 'User Story').length - totalWipStories}s)</div>
+          <div class="exec-agg-corner-stat"><div class="exec-agg-corner-val">${totalActive.length - totalWip}</div><div class="exec-agg-corner-label">backlog</div></div>
         </div>
         <div class="exec-agg-card">
           <div class="exec-agg-label">Stale / Blocked</div>
@@ -996,7 +1027,9 @@ async function buildExecutiveSummaryPanel(cachedData, settings, sortedPods) {
   const podsReady = podPredStatus.filter(p => p.ready)
   const podsNotReady = podPredStatus.filter(p => !p.ready)
 
-  const aggPred = calcPredictions(allItems, 8)
+  const allPodIds = pods.map(p => p.id)
+  const aggCapacity = calcCapacityContext(holidays, allPodIds)
+  const aggPred = calcPredictions(allItems, 8, aggCapacity)
   let podCoverageNote = ''
   if (podsNotReady.length > 0 && podsReady.length > 0) {
     podCoverageNote = `Based on ${podsReady.length} of ${pods.length} pods (${podsNotReady.length} pod${podsNotReady.length === 1 ? '' : 's'} need more history)`
@@ -1008,7 +1041,7 @@ async function buildExecutiveSummaryPanel(cachedData, settings, sortedPods) {
   const podTpMedians = podsReady.map(ps => {
     const pod = pods.find(p => p.name === ps.name)
     if (!pod) return null
-    const pred = calcPredictions(pod.items || [], 8)
+    const pred = calcPredictions(pod.items || [], 8, calcCapacityContext(holidays, pod.id))
     return pred.ready ? pred.throughput.likely : null
   }).filter(v => v !== null)
   const podSpread = podTpMedians.length >= 2
@@ -1078,11 +1111,35 @@ async function buildExecutiveSummaryPanel(cachedData, settings, sortedPods) {
     const pred = calcThroughputPredictability(pItems, 8)
     const pInsights = podInsightsMap[pod.id] || []
 
+    // Per-pod cycle time (active → closed)
+    const pEnriched = await enrichWithStartedAt(pItems, settings)
+    const pCtData = calcCycleTimes(pEnriched)
+    const pCtValid = pCtData.filter(i => i.inProgressToClose !== null)
+    const pCtAvg = pCtValid.length
+      ? +(pCtValid.reduce((s, i) => s + i.inProgressToClose, 0) / pCtValid.length).toFixed(1)
+      : null
+    const pCtLastItems = pCtData.filter(i => {
+      const d = new Date(i.closedDate)
+      return lastWeekBucket && d >= lastWeekBucket.start && d <= lastWeekBucket.end && i.inProgressToClose !== null
+    })
+    const pCtLast = pCtLastItems.length
+      ? +(pCtLastItems.reduce((s, i) => s + i.inProgressToClose, 0) / pCtLastItems.length).toFixed(1)
+      : null
+    const prevWeekBucket = buckets[buckets.length - 3]
+    const pCtPrevItems = pCtData.filter(i => {
+      const d = new Date(i.closedDate)
+      return prevWeekBucket && d >= prevWeekBucket.start && d <= prevWeekBucket.end && i.inProgressToClose !== null
+    })
+    const pCtPrev = pCtPrevItems.length
+      ? +(pCtPrevItems.reduce((s, i) => s + i.inProgressToClose, 0) / pCtPrevItems.length).toFixed(1)
+      : null
+
     // Week-over-week comparison rows (last week vs week before + avg)
     const wowRows = [
       { metric: 'Arrival', curr: pArrLast, prev: pArrPrev, avg: pArrAvg, upIsBad: true },
       { metric: 'Throughput', curr: pTpLast, prev: pTpPrev, avg: pTpAvg, upIsBad: false },
       { metric: 'TP / Person', curr: pTpPPLast, prev: pTpPPPrev, avg: pTpPPAvg, upIsBad: false },
+      { metric: 'Cycle Time (d)', curr: pCtLast, prev: pCtPrev, avg: pCtAvg, upIsBad: true },
       { metric: 'Triage', curr: pTriage, prev: pTriagePrev, avg: null, upIsBad: true },
       { metric: 'Aged >7d', curr: pAged, prev: null, avg: null, upIsBad: true },
     ]
@@ -1121,7 +1178,7 @@ async function buildExecutiveSummaryPanel(cachedData, settings, sortedPods) {
             <tbody>
     `
     for (const row of wowRows) {
-      const diff = row.prev != null ? +(row.curr - row.prev).toFixed(1) : null
+      const diff = row.prev != null && row.curr != null ? +(row.curr - row.prev).toFixed(1) : null
       let deltaCls = 'exec-wow-delta-neutral'
       let deltaText = '—'
       if (diff != null) {
@@ -1137,7 +1194,7 @@ async function buildExecutiveSummaryPanel(cachedData, settings, sortedPods) {
       }
       html += `<tr>
         <td class="exec-wow-metric">${escHtml(row.metric)}</td>
-        <td>${row.curr}</td>
+        <td>${row.curr != null ? row.curr : '—'}</td>
         <td>${row.prev != null ? row.prev : '—'}</td>
         <td class="${deltaCls}">${deltaText}</td>
         <td class="exec-wow-avg">${row.avg != null ? row.avg : '—'}</td>
@@ -1179,7 +1236,8 @@ async function buildExecutiveSummaryPanel(cachedData, settings, sortedPods) {
     }
 
     // Pod predictions
-    const podPred = calcPredictions(pItems, 8)
+    const podCapacity = calcCapacityContext(holidays, pod.id)
+    const podPred = calcPredictions(pItems, 8, podCapacity)
     html += renderExecPredictions(podPred)
 
     // Notes
@@ -1319,12 +1377,12 @@ function buildPodPanel(pod) {
       <button class="filter-btn active" data-filter="all">All</button>
       ${assigneeBtns}
       <button class="filter-btn" data-filter="unassigned">Unassigned</button>
-      <button class="filter-btn" data-filter="aged">🔴 Aged &gt;90d</button>
+      <button class="filter-btn" data-filter="aged">🔴 Aged &gt;7d</button>
       <button class="filter-btn" data-filter="bugs">Bugs only</button>
     </div>
     <div class="stats-row">
       ${columnNames.map(col => `<div class="stat-card"><div class="label">${escHtml(col)}</div><div class="value" style="color:${getColumnColor(col)}">${byCol[col].length}</div></div>`).join('')}
-      <div class="stat-card"><div class="label">Aged &gt;90d</div><div class="value kv-aged">${active.filter(i=>ageDays(i)>=90).length}</div></div>
+      <div class="stat-card"><div class="label">Aged &gt;7d</div><div class="value kv-aged">${active.filter(i=>ageDays(i)>=7).length}</div></div>
       <div class="stat-card"><div class="label">Total</div><div class="value kv-total">${active.length}</div></div>
     </div>
     <div class="team-row">${teamCardsHtml}</div>
@@ -1394,7 +1452,7 @@ function buildPodPanel(pod) {
     panel.querySelectorAll('.card').forEach(card => {
       let filterShow = v === 'all' ? true
         : v === 'unassigned' ? card.dataset.assignee === '__unassigned__'
-        : v === 'aged'       ? parseInt(card.dataset.age, 10) >= 90
+        : v === 'aged'       ? parseInt(card.dataset.age, 10) >= 7
         : v === 'bugs'       ? card.dataset.type === 'Bug'
         : v.startsWith('assignee:') ? card.dataset.assignee === v.slice(9)
         : true;

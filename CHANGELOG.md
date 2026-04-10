@@ -4,6 +4,23 @@ All notable changes to Kanban Manager are documented here.
 
 ---
 
+## [1.3.2] — 2026-04-10
+
+### Added
+
+- **Cycle time metric (active → closed)** — Average cycle time from when an item enters Active/In Progress to when it's Closed, shown in the Throughput aggregate KPI card as a bold top-right badge and as a new "Cycle Time (d)" row in per-pod week-over-week tables with last week, week before, change, and 8-week average.
+- **Holiday-aware predictions** — Predictions now account for team holidays entered on the Team page. Historical throughput weeks are normalized by capacity (so a holiday week with 3 items at 60% capacity is treated as ~5 at full capacity, not dragging down percentiles). Forward forecasts scale by upcoming capacity. Weeks with less than 20% capacity are excluded from percentile calculation entirely.
+- **Capacity notes on forecasts** — Forecast blocks ("Next 2 weeks", "Next 4 weeks") now show person-days off and percentage capacity when holidays are upcoming. Aggregate view shows counts ("3 person-days off (2 people) · 96% capacity"), per-pod view shows names ("Adrian (2d), Michael (1d) off · 94% capacity").
+
+### Improved
+
+- **KPI card visual hierarchy** — Throughput/Person average and Active WIP backlog count are now bold top-right corner stats instead of small italic footnotes. Arrival and Throughput cards split the avg/this-week line with right-aligned "This week" for easier scanning.
+- **Net Flow colours** — WIP growing now renders in red, WIP shrinking in green, and WIP stable in muted white. Previously used undefined CSS variables (`var(--red)`, `var(--green)`) that fell back to white for all states.
+- **Aged threshold unified to 7 days** — Overview panel, per-pod boards, filter buttons, and popup all now use >7 days consistently. Previously the executive summary used 7 days but all other surfaces still used >90 days.
+- **WoW table null handling** — Per-pod week-over-week table now gracefully handles null current values (displays "—") instead of rendering "null" as text.
+
+---
+
 ## [1.3.1] — 2026-04-09
 
 ### Added

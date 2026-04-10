@@ -65,7 +65,7 @@ function render(data) {
   const triageCnt  = colCount(cols, 'Triage', 'Intake');
   const wipCnt     = colCount(cols, 'In Progress', 'Active') + colCount(cols, 'Code Review', 'Review');
   const releaseCnt = colCount(cols, 'Ready');
-  const agedCnt    = allActive.filter(i => ageDays(i) >= 90).length;
+  const agedCnt    = allActive.filter(i => ageDays(i) >= 7).length;
 
   $('s-triage').textContent  = triageCnt;
   $('s-wip').textContent     = wipCnt;
@@ -93,7 +93,7 @@ function render(data) {
     const pCols   = columnCounts(pActive);
     const pWip    = colCount(pCols, 'In Progress', 'Active') + colCount(pCols, 'Code Review', 'Review');
     const pTriage = colCount(pCols, 'Triage', 'Intake');
-    const pAged   = pActive.filter(x => ageDays(x) >= 90).length;
+    const pAged   = pActive.filter(x => ageDays(x) >= 7).length;
     const pStats  = arrivalStats(pod.items || []);
     const color   = podColor(pod.id);
     const errIcon = pod.error ? ' ⚠' : '';
@@ -104,7 +104,7 @@ function render(data) {
         <span class="chip chip-triage" title="Triage">${pTriage}</span>
         <span class="chip chip-wip"    title="WIP">${pWip}</span>
         <span class="chip chip-arr"    title="This week">↑${pStats.last7}/wk</span>
-        ${pAged > 0 ? `<span class="chip chip-aged" title="Aged >90d">⚠${pAged}</span>` : ''}
+        ${pAged > 0 ? `<span class="chip chip-aged" title="Aged >7d">⚠${pAged}</span>` : ''}
       </div>
     </div>`;
   }).join('');
