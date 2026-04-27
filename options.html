@@ -110,6 +110,11 @@
     padding: 0.65rem 1.25rem; font-size: 0.9rem; cursor: pointer;
   }
   .btn-secondary:hover { background: var(--border); color: var(--text); }
+  .btn-tiny {
+    background: var(--input-bg); color: var(--muted); border: 1px solid var(--border);
+    border-radius: 6px; padding: 0.2rem 0.55rem; font-size: 0.7rem; cursor: pointer;
+  }
+  .btn-tiny:hover { background: var(--surface2); color: var(--text); }
   .status { font-size: 0.875rem; margin-top: 0.75rem; min-height: 1.2em; }
   .status.ok { color: #22c55e; } .status.err { color: #ef4444; }
   .test-result {
@@ -180,6 +185,10 @@
 
       <div class="section-title">
         <span>Pods / Teams</span>
+        <span style="display:flex;gap:.4rem;text-transform:none;letter-spacing:0;font-weight:400">
+          <button type="button" class="btn-tiny" id="pods-export-btn" title="Download pods as JSON">⤓ Export</button>
+          <button type="button" class="btn-tiny" id="pods-import-btn" title="Replace pods from a JSON file">⤒ Import</button>
+        </span>
       </div>
       <p class="hint" style="margin-bottom:0.75rem">Each pod maps to an ADO area path. Add one row per team you want to track.</p>
       <div id="pods-list"></div>

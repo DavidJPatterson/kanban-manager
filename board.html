@@ -161,6 +161,14 @@
   .trend-up-good { background: rgba(34,197,94,.15); color: #86efac; }
   .trend-neutral { background: rgba(148,163,184,.1); color: var(--muted); }
 
+  /* Tall person-by-week charts get an internal scroll so they don't
+     stretch the metrics grid row. Capped to ~12-13 visible rows. */
+  .closed-person-chart,
+  .resolved-person-chart,
+  .pod-closed-person,
+  .pod-resolved-person { max-height: 360px; overflow-y: auto; overflow-x: hidden; position: relative; }
+  .cbp-header { position: sticky; top: 0; z-index: 1; background: var(--surface); padding-bottom: 2px; }
+
   /* ── Tab bar ── */
   .tab-bar {
     background: var(--surface); border-bottom: 1px solid var(--border);

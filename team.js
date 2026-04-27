@@ -326,6 +326,62 @@ async function save() {
   await setTeamHolidays(_holidays)
 }
 
+// ─── Holidays import / export ────────────────────────────────────────────────
+
+function exportHolidays() {
+  const podCount = Object.keys(_holidays).length
+  if (!podCount) { setStatus('No holidays to export.', 'err'); return }
+  // Pod metadata so cross-install merge can match by areaPath rather than
+  // the random local pod.id (which differs on every install).
+  const podMeta = {}
+  for (const pod of (_settings?.pods || [])) {
+    if (pod?.id) podMeta[pod.id] = { areaPath: pod.areaPath, name: pod.name }
+  }
+  const payload = {
+    type: 'kanban-manager-holidays',
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    pods: podMeta,
+    holidays: _holidays
+  }
+  const stamp = new Date().toISOString().slice(0, 10)
+  downloadJson(`kanban-manager-holidays-${stamp}.json`, payload)
+  setStatus(`Exported holidays for ${podCount} pod${podCount !== 1 ? 's' : ''}.`, 'ok')
+}
+
+async function importHolidays() {
+  let payload
+  try { payload = await pickJsonFile() }
+  catch (err) {
+    if (err.message !== 'No file selected') setStatus(err.message, 'err')
+    return
+  }
+  if (payload?.type !== 'kanban-manager-holidays' || !payload.holidays || typeof payload.holidays !== 'object' || !payload.pods || typeof payload.pods !== 'object') {
+    setStatus('Not a valid holidays export file.', 'err'); return
+  }
+  const remapped = remapHolidaysToLocalPodIds(payload.holidays, payload.pods, _settings?.pods || [])
+
+  const incomingPods = Object.keys(payload.holidays).length
+  const matchedByPath = Object.keys(remapped).filter(localId => (_settings?.pods || []).some(p => p.id === localId)).length
+  const existingPods = Object.keys(_holidays).length
+
+  const mode = await pickImportMode(`File contains holidays for ${incomingPods} pod${incomingPods !== 1 ? 's' : ''}. ${matchedByPath} of ${incomingPods} matched a local pod by area path. You currently have data for ${existingPods}. Replace wipes existing; Merge keeps existing and unions holiday entries by member email.`)
+  if (mode === 'cancel') return
+
+  if (mode === 'replace') {
+    _holidays = remapped
+    await save()
+    renderPods(_settings.pods || [])
+    setStatus(`Replaced holidays with data for ${incomingPods} pod${incomingPods !== 1 ? 's' : ''}.`, 'ok')
+  } else {
+    const { result, podsTouched, membersAdded, membersMerged } = mergeHolidays(_holidays, remapped)
+    _holidays = result
+    await save()
+    renderPods(_settings.pods || [])
+    setStatus(`Merged ${podsTouched} pod${podsTouched !== 1 ? 's' : ''}: ${membersAdded} member(s) added, ${membersMerged} member(s) updated.`, 'ok')
+  }
+}
+
 function setStatus(msg, cls) {
   const el = $('status')
   el.textContent = msg
@@ -348,6 +404,10 @@ function setStatus(msg, cls) {
 
   // Sync all
   $('sync-all-btn').addEventListener('click', syncAllPods)
+
+  // Holidays import / export
+  $('export-holidays-btn').addEventListener('click', exportHolidays)
+  $('import-holidays-btn').addEventListener('click', importHolidays)
 
   // Load data
   _settings = await getSettings()
