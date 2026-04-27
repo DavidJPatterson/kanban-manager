@@ -1271,6 +1271,189 @@ function setTeamHolidays(data) {
   )
 }
 
+// ─── JSON import / export helpers ────────────────────────────────────────────
+
+function downloadJson(filename, obj) {
+  const blob = new Blob([JSON.stringify(obj, null, 2)], { type: 'application/json' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  setTimeout(() => URL.revokeObjectURL(url), 1000)
+}
+
+// Show a small inline modal asking the user how to import. Resolves to
+// 'replace' | 'merge' | 'cancel'. Self-contained — no external CSS needed.
+function pickImportMode(summary) {
+  return new Promise(resolve => {
+    const overlay = document.createElement('div')
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;z-index:99999;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif'
+    overlay.innerHTML = `
+      <div style="background:var(--surface,#1e293b);color:var(--text,#f1f5f9);border:1px solid var(--border,#334155);border-radius:12px;padding:1.25rem 1.5rem;max-width:420px;width:90%;box-shadow:0 20px 60px rgba(0,0,0,.4)">
+        <div style="font-size:1rem;font-weight:600;margin-bottom:.4rem">Import data</div>
+        <div style="font-size:.85rem;color:var(--muted,#94a3b8);margin-bottom:1rem;line-height:1.4">${escSvg(summary)}</div>
+        <div style="display:flex;gap:.5rem;justify-content:flex-end;flex-wrap:wrap">
+          <button data-mode="cancel" style="background:transparent;color:var(--muted,#94a3b8);border:1px solid var(--border,#334155);border-radius:8px;padding:.5rem 1rem;font-size:.85rem;cursor:pointer">Cancel</button>
+          <button data-mode="merge" style="background:var(--surface2,#334155);color:var(--text,#f1f5f9);border:none;border-radius:8px;padding:.5rem 1rem;font-size:.85rem;cursor:pointer;font-weight:600">Merge with existing</button>
+          <button data-mode="replace" style="background:#dc2626;color:#fff;border:none;border-radius:8px;padding:.5rem 1rem;font-size:.85rem;cursor:pointer;font-weight:600">Replace all</button>
+        </div>
+      </div>`
+    function done(mode) {
+      document.removeEventListener('keydown', onKey)
+      overlay.remove()
+      resolve(mode)
+    }
+    function onKey(e) { if (e.key === 'Escape') done('cancel') }
+    overlay.addEventListener('click', e => {
+      if (e.target === overlay) return done('cancel')
+      const btn = e.target.closest('[data-mode]')
+      if (btn) done(btn.dataset.mode)
+    })
+    document.addEventListener('keydown', onKey)
+    document.body.appendChild(overlay)
+  })
+}
+
+// Merge incoming pods into existing pods. Match by areaPath (case-insensitive,
+// trimmed). For matches, preserve existing id but take name/description from
+// incoming. Non-matches are appended as new pods with a fresh id if needed.
+function mergePods(existing, incoming) {
+  const result = existing.map(p => ({ ...p }))
+  const indexByPath = new Map(result.map((p, i) => [p.areaPath.trim().toLowerCase(), i]))
+  let added = 0, updated = 0
+  for (const inc of incoming) {
+    const key = inc.areaPath.trim().toLowerCase()
+    if (indexByPath.has(key)) {
+      const idx = indexByPath.get(key)
+      result[idx] = { ...result[idx], name: inc.name, description: inc.description || '' }
+      updated++
+    } else {
+      const usedIds = new Set(result.map(p => p.id))
+      const id = inc.id && !usedIds.has(inc.id) ? inc.id : 'pod-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6)
+      result.push({ id, name: inc.name, areaPath: inc.areaPath, description: inc.description || '' })
+      indexByPath.set(key, result.length - 1)
+      added++
+    }
+  }
+  return { result, added, updated }
+}
+
+// Rewrite top-level pod IDs in a holidays object from the IDs used in an
+// export file to the IDs used in the local install, by matching on areaPath.
+// pod.id is a random local string and won't match across installs; areaPath is
+// the actual ADO mapping and is the only stable cross-install identifier.
+//
+// `incomingPodMeta` is `{ [podId]: { areaPath, name } }` from the export file.
+// If two incoming pods remap to the same local pod (shouldn't happen in
+// practice but defensive), members and _podPaused are shallow-merged.
+function remapHolidaysToLocalPodIds(holidays, incomingPodMeta, currentPods) {
+  if (!holidays || typeof holidays !== 'object') return {}
+  const currentByPath = new Map()
+  for (const p of (currentPods || [])) {
+    if (p?.areaPath) currentByPath.set(p.areaPath.trim().toLowerCase(), p.id)
+  }
+  const result = {}
+  for (const incomingPodId of Object.keys(holidays)) {
+    let targetId = incomingPodId
+    const meta = incomingPodMeta && incomingPodMeta[incomingPodId]
+    if (meta?.areaPath) {
+      const localId = currentByPath.get(meta.areaPath.trim().toLowerCase())
+      if (localId) targetId = localId
+    }
+    if (result[targetId]) {
+      // Two incoming pods collapsed onto the same local pod — shallow merge
+      const incPod = holidays[incomingPodId]
+      for (const k of Object.keys(incPod)) {
+        if (k === '_podPaused') { result[targetId]._podPaused = incPod._podPaused; continue }
+        if (!result[targetId][k]) result[targetId][k] = incPod[k]
+      }
+    } else {
+      result[targetId] = holidays[incomingPodId]
+    }
+  }
+  return result
+}
+
+// Merge incoming holidays into existing. Top-level keys are pod IDs. Within
+// each pod, _podPaused is an overwrite (incoming wins); members are matched
+// by uniqueName (email) then by id, and holiday arrays are unioned by start+end.
+function mergeHolidays(existing, incoming) {
+  const result = JSON.parse(JSON.stringify(existing || {}))
+  let podsTouched = 0, membersAdded = 0, membersMerged = 0
+  for (const podId of Object.keys(incoming || {})) {
+    const incPod = incoming[podId]
+    if (!incPod || typeof incPod !== 'object') continue
+    if (!result[podId]) { result[podId] = JSON.parse(JSON.stringify(incPod)); podsTouched++; continue }
+    const existPod = result[podId]
+    podsTouched++
+    // Build lookup of existing members by uniqueName then id
+    const byUnique = {}
+    const byId = {}
+    for (const k of Object.keys(existPod)) {
+      if (k === '_podPaused') continue
+      const m = existPod[k]
+      if (m?.uniqueName) byUnique[m.uniqueName.toLowerCase()] = k
+      byId[k] = k
+    }
+    for (const memberKey of Object.keys(incPod)) {
+      if (memberKey === '_podPaused') {
+        existPod._podPaused = incPod._podPaused
+        continue
+      }
+      const incMember = incPod[memberKey]
+      if (!incMember || typeof incMember !== 'object') continue
+      const matchKey =
+        (incMember.uniqueName && byUnique[incMember.uniqueName.toLowerCase()]) ||
+        byId[memberKey] ||
+        null
+      if (matchKey) {
+        const existMember = existPod[matchKey]
+        existMember.name = incMember.name || existMember.name
+        existMember.uniqueName = incMember.uniqueName || existMember.uniqueName
+        const seen = new Set((existMember.holidays || []).map(h => `${h.start || h.from}|${h.end || h.to}`))
+        for (const h of (incMember.holidays || [])) {
+          const k = `${h.start || h.from}|${h.end || h.to}`
+          if (!seen.has(k)) { existMember.holidays.push(h); seen.add(k) }
+        }
+        membersMerged++
+      } else {
+        existPod[memberKey] = JSON.parse(JSON.stringify(incMember))
+        if (incMember.uniqueName) byUnique[incMember.uniqueName.toLowerCase()] = memberKey
+        byId[memberKey] = memberKey
+        membersAdded++
+      }
+    }
+  }
+  return { result, podsTouched, membersAdded, membersMerged }
+}
+
+// Returns a Promise resolving to parsed JSON, or rejecting on parse/cancel.
+function pickJsonFile() {
+  return new Promise((resolve, reject) => {
+    const input = document.createElement('input')
+    input.type = 'file'
+    input.accept = 'application/json,.json'
+    input.style.display = 'none'
+    input.addEventListener('change', () => {
+      const file = input.files && input.files[0]
+      if (!file) { reject(new Error('No file selected')); return }
+      const reader = new FileReader()
+      reader.onload = () => {
+        try { resolve(JSON.parse(reader.result)) }
+        catch (err) { reject(new Error('Invalid JSON: ' + err.message)) }
+      }
+      reader.onerror = () => reject(new Error('Failed to read file'))
+      reader.readAsText(file)
+    })
+    document.body.appendChild(input)
+    input.click()
+    setTimeout(() => input.remove(), 0)
+  })
+}
+
 // Sums counts for all column keys containing any of the given substrings (case-insensitive).
 // Use this instead of exact key lookups so variant column names (e.g. 'Triage' vs 'Intake/Triage') still match.
 function colCount(cols, ...keywords) {
@@ -1855,18 +2038,24 @@ function renderClosedByPersonChart(container, data, opts = {}) {
 
   const ROW_H = 28;
   const W = opts.width || 500;
-  const PAD = { top: 18, right: 90, bottom: 10, left: 100 };
-  const LABEL_GAP = 30; // reserve space for count label after bar
+  const PAD = { top: 4, right: 90, bottom: 10, left: 100 };
+  const LABEL_GAP = 48; // reserve space for "this / last" count label after bar
   const chartW = W - PAD.left - PAD.right;
   const barMaxW = chartW - LABEL_GAP; // max bar width so label never overlaps avg/wk
+  const HEADER_H = 16;
   const H = PAD.top + data.length * ROW_H + PAD.bottom;
   const maxVal = Math.max(1, ...data.flatMap(d => [d.thisWeek, ...d.weekly]));
 
-  let svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" style="width:100%;height:auto">`;
+  // Header SVG — rendered separately so the parent can sticky-position it above the scroll
+  const legendX = PAD.left + 50;
+  let header = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${HEADER_H}" style="width:100%;height:auto;display:block">`;
+  header += `<text x="${PAD.left}" y="11" font-size="8" fill="#64748b">this week</text>`;
+  header += `<rect x="${legendX}" y="5" width="10" height="6" rx="1" fill="none" stroke="#64748b" stroke-width="1.2" stroke-dasharray="3,2"/>`;
+  header += `<text x="${legendX + 14}" y="11" font-size="8" fill="#64748b">last week</text>`;
+  header += `<text x="${PAD.left + chartW + 6}" y="11" font-size="8" fill="#64748b">avg/wk</text>`;
+  header += '</svg>';
 
-  // Column headers
-  svg += `<text x="${PAD.left}" y="11" font-size="8" fill="#64748b">this week</text>`;
-  svg += `<text x="${PAD.left + chartW + 6}" y="11" font-size="8" fill="#64748b">avg/wk</text>`;
+  let svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block">`;
 
   data.forEach((d, i) => {
     const y = PAD.top + i * ROW_H;
@@ -1877,16 +2066,21 @@ function renderClosedByPersonChart(container, data, opts = {}) {
     // Name
     svg += `<text x="${PAD.left - 6}" y="${y + ROW_H / 2 + 3}" text-anchor="end" font-size="10" fill="currentColor">${escSvg(short)}</text>`;
 
+    // Last week dashed-outline bar (drawn first so the solid this-week bar overlays it)
+    const lastWeek = d.weekly[d.weekly.length - 2] || 0;
+    const lastBarW = (lastWeek / maxVal) * barMaxW;
+    if (lastBarW > 0) {
+      svg += `<rect x="${PAD.left}" y="${y + 5}" width="${lastBarW}" height="${barH}" rx="3" fill="none" stroke="${color}" stroke-width="1.2" stroke-dasharray="3,2" opacity="0.85"><title>last week ${lastWeek}</title></rect>`;
+    }
+
     // This week bar
     const barW = Math.max(1, (d.thisWeek / maxVal) * barMaxW);
-    svg += `<rect x="${PAD.left}" y="${y + 5}" width="${barW}" height="${barH}" rx="3" fill="${color}" opacity="0.75"/>`;
+    svg += `<rect x="${PAD.left}" y="${y + 5}" width="${barW}" height="${barH}" rx="3" fill="${color}" opacity="0.75"><title>this week ${d.thisWeek}</title></rect>`;
 
-    // This week count label
-    svg += `<text x="${PAD.left + barW + 4}" y="${y + ROW_H / 2 + 3}" font-size="10" font-weight="600" fill="${color}">${d.thisWeek}</text>`;
-
-    // Average marker line (dashed vertical)
-    const avgX = PAD.left + (d.avg / maxVal) * barMaxW;
-    svg += `<line x1="${avgX}" y1="${y + 3}" x2="${avgX}" y2="${y + ROW_H - 3}" stroke="#64748b" stroke-width="1.5" stroke-dasharray="3,2"><title>avg ${escSvg(d.avg)}/wk</title></line>`;
+    // Count labels: bold this-week, then muted last-week after a separator
+    const labelX = PAD.left + Math.max(barW, lastBarW) + 4;
+    svg += `<text x="${labelX}" y="${y + ROW_H / 2 + 3}" font-size="10" font-weight="600" fill="${color}">${d.thisWeek}</text>`;
+    svg += `<text x="${labelX + 12}" y="${y + ROW_H / 2 + 3}" font-size="9" fill="#64748b">/ ${lastWeek}</text>`;
 
     // Avg/wk label on right
     svg += `<text x="${PAD.left + chartW + 6}" y="${y + ROW_H / 2 + 3}" font-size="9" fill="#64748b">${d.avg}</text>`;
@@ -1906,7 +2100,7 @@ function renderClosedByPersonChart(container, data, opts = {}) {
   });
 
   svg += '</svg>';
-  container.innerHTML = svg;
+  container.innerHTML = `<div class="cbp-header">${header}</div><div class="cbp-body">${svg}</div>`;
 }
 
 // ─── SVG horizontal bar chart (stale items by column) ────────────────────────

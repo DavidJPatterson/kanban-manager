@@ -4,13 +4,15 @@ All notable changes to Kanban Manager are documented here.
 
 ---
 
-## [1.3.2] — 2026-04-10
+## [1.3.2] — 2026-04-27
 
 ### Added
 
 - **Cycle time metric (active → closed)** — Average cycle time from when an item enters Active/In Progress to when it's Closed, shown in the Throughput aggregate KPI card as a bold top-right badge and as a new "Cycle Time (d)" row in per-pod week-over-week tables with last week, week before, change, and 8-week average.
 - **Holiday-aware predictions** — Predictions now account for team holidays entered on the Team page. Historical throughput weeks are normalized by capacity (so a holiday week with 3 items at 60% capacity is treated as ~5 at full capacity, not dragging down percentiles). Forward forecasts scale by upcoming capacity. Weeks with less than 20% capacity are excluded from percentile calculation entirely.
 - **Capacity notes on forecasts** — Forecast blocks ("Next 2 weeks", "Next 4 weeks") now show person-days off and percentage capacity when holidays are upcoming. Aggregate view shows counts ("3 person-days off (2 people) · 96% capacity"), per-pod view shows names ("Adrian (2d), Michael (1d) off · 94% capacity").
+- **Pods import / export (Settings)** — JSON backup, restore, and sharing for pod definitions. Import offers Replace All (wipe and load) or Merge (match incoming pods by area path, preserving existing pod ids so cached work-item data stays correctly keyed, and updating names/descriptions from the file).
+- **Holidays import / export (Team page)** — JSON backup, restore, and sharing for team holidays and pod-pause state. Export embeds pod metadata (area path + name) so merge can match across installs by area path rather than the install-local random pod id. Import offers Replace All or Merge (members matched by email with id fallback; holiday entries unioned and deduped by start+end).
 
 ### Improved
 
@@ -18,6 +20,8 @@ All notable changes to Kanban Manager are documented here.
 - **Net Flow colours** — WIP growing now renders in red, WIP shrinking in green, and WIP stable in muted white. Previously used undefined CSS variables (`var(--red)`, `var(--green)`) that fell back to white for all states.
 - **Aged threshold unified to 7 days** — Overview panel, per-pod boards, filter buttons, and popup all now use >7 days consistently. Previously the executive summary used 7 days but all other surfaces still used >90 days.
 - **WoW table null handling** — Per-pod week-over-week table now gracefully handles null current values (displays "—") instead of rendering "null" as text.
+- **"Items Closed/Resolved by Person" — last week comparison** — Replaced the dashed average-position line with a dashed-outline bar showing last week's count overlaid on this week's solid bar. Count labels switched to `<this> / <last>` format (bold coloured this week, muted grey last week), making the actual delta legible at a glance rather than just the direction. Average and 8-week sparkline remain in the right column.
+- **Per-person charts — sticky headers + internal scroll** — Per-person charts now scroll internally at ~12–13 rows so they don't stretch the metrics grid row when an org has many assignees. Column headers (this week / last week / avg/wk) stay pinned at the top of the scroll container.
 
 ---
 

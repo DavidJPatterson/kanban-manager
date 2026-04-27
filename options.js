@@ -98,6 +98,9 @@ document.addEventListener('DOMContentLoaded', () => {
     themeBtn.addEventListener('click', () => toggleTheme().then(t => { themeBtn.textContent = t === 'dark' ? '☀' : '☾' }))
   }
 
+  document.getElementById('pods-export-btn').addEventListener('click', exportPods);
+  document.getElementById('pods-import-btn').addEventListener('click', importPods);
+
   document.getElementById('add-pod-btn').addEventListener('click', () => {
     const list = $('pods-list');
     const idx = list.children.length;
@@ -164,6 +167,61 @@ function save() {
       chrome.runtime.sendMessage({ type: 'REFRESH' });
     });
   });
+}
+
+// ─── Pods import / export ─────────────────────────────────────────────────────
+
+function exportPods() {
+  const pods = readPods();
+  if (!pods.length) { setStatus('No pods to export.', false); return; }
+  const payload = {
+    type: 'kanban-manager-pods',
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    pods
+  };
+  const stamp = new Date().toISOString().slice(0, 10);
+  downloadJson(`kanban-manager-pods-${stamp}.json`, payload);
+  setStatus(`Exported ${pods.length} pod${pods.length !== 1 ? 's' : ''}.`, true);
+}
+
+async function importPods() {
+  let payload;
+  try { payload = await pickJsonFile(); }
+  catch (err) {
+    if (err.message !== 'No file selected') setStatus(err.message, false);
+    return;
+  }
+  if (payload?.type !== 'kanban-manager-pods' || !Array.isArray(payload.pods)) {
+    setStatus('Not a valid pods export file.', false); return;
+  }
+  const incoming = payload.pods
+    .filter(p => p && typeof p.name === 'string' && typeof p.areaPath === 'string')
+    .map(p => ({
+      id: typeof p.id === 'string' && p.id ? p.id : '',
+      name: p.name.trim(),
+      areaPath: p.areaPath.trim(),
+      description: typeof p.description === 'string' ? p.description : ''
+    }))
+    .filter(p => p.name && p.areaPath);
+  if (!incoming.length) { setStatus('No valid pods found in file.', false); return; }
+
+  const existing = readPods();
+  const mode = await pickImportMode(`File contains ${incoming.length} pod${incoming.length !== 1 ? 's' : ''}. You currently have ${existing.length}. Replace overwrites everything; Merge keeps existing pods and adds/updates by area path.`);
+  if (mode === 'cancel') return;
+
+  if (mode === 'replace') {
+    const final = incoming.map(p => ({
+      ...p,
+      id: p.id || 'pod-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6)
+    }));
+    renderPodList(final);
+    setStatus(`Loaded ${final.length} pod${final.length !== 1 ? 's' : ''} (replace mode). Click Save Settings to persist.`, true);
+  } else {
+    const { result, added, updated } = mergePods(existing, incoming);
+    renderPodList(result);
+    setStatus(`Merged: ${added} added, ${updated} updated, ${existing.length - updated} unchanged. Click Save Settings to persist.`, true);
+  }
 }
 
 // ─── Test connection ──────────────────────────────────────────────────────────
