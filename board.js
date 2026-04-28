@@ -1666,6 +1666,24 @@ async function buildExecutiveSummaryPanel(cachedData, settings, sortedPods) {
       if (entry) { entry.needsFromLeadership = cb.checked; await persistWu() }
     })
   })
+
+  panel.querySelectorAll('.exec-promote-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const podId = btn.dataset.pod
+      const category = btn.dataset.category
+      const entryId = btn.dataset.entryId
+      const list = wu.pods[podId][category]
+      const src = list?.find(e => e.id === entryId)
+      if (!src) return
+      const headlineCategory = category === 'progress' ? 'wins' : category
+      const copy = JSON.parse(JSON.stringify(src))
+      copy.id = crypto.randomUUID()
+      copy.sourcePodId = podId
+      wu.unitHeadline[headlineCategory].push(copy)
+      await persistWu()
+      buildExecutiveSummaryPanel(cachedData, settings, sortedPods)
+    })
+  })
 }
 
 // ─── Per-pod panel ────────────────────────────────────────────────────────────
