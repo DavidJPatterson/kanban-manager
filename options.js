@@ -63,6 +63,7 @@ document.addEventListener('DOMContentLoaded', () => {
     $('org').value = s.org || '';
     $('project').value = s.project || '';
     $('pat').value = s.pat || '';
+    $('unit-name').value = s.unitName || '';
     $('refreshInterval').value = String(s.refreshInterval || 15);
     $('staleDays').value = String(s.staleDays || 2);
     renderPodList(s.pods || []);
@@ -128,6 +129,7 @@ function save() {
   const settings = {
     org: $('org').value.trim(),
     project: $('project').value.trim(),
+    unitName: $('unit-name').value.trim(),
     pat: $('pat').value.trim(),
     refreshInterval: parseInt($('refreshInterval').value, 10),
     staleDays: parseInt($('staleDays').value, 10) || 2,
