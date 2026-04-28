@@ -8,6 +8,8 @@ const DEFAULT_SETTINGS = {
   pat: '',
   pods: [],
   executiveSummary: false,
+  unitName: '',
+  teamLeads: [],
   overviewCharts: {
     cycleTimeInProgress: false,
     cycleTimeArrival: false,
@@ -37,6 +39,7 @@ const STORAGE_KEYS = {
   theme: 'theme',
   execSummaryNotes: 'execSummaryNotes',
   teamHolidays: 'teamHolidays',
+  weeklyUpdates: 'weeklyUpdates',
 }
 
 // ─── Storage helpers ───────────────────────────────────────────────────────────
