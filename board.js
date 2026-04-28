@@ -989,18 +989,66 @@ async function buildExecutiveSummaryPanel(cachedData, settings, sortedPods) {
   const readonly = isFinalised
   const headline = wu.unitHeadline || { wins: [], issues: [], actions: [] }
 
+  function renderOwnerPicker(pod, currentOwner, ro) {
+    if (ro) {
+      return currentOwner
+        ? `<span class="exec-owner">${currentOwner.kind === 'lead' ? '👑 ' : ''}${escHtml(currentOwner.name)}</span>`
+        : '<span class="exec-owner exec-owner-empty">no owner</span>'
+    }
+    const teamLeads = settings.teamLeads || []
+    const podLeads = teamLeads.filter(l => (l.podIds || []).includes(pod.id))
+    const otherLeads = teamLeads.filter(l => !(l.podIds || []).includes(pod.id))
+    const assignees = [...new Set((pod.items || []).filter(i => i.assignee).map(i => i.assignee))]
+    function opt(value, label, selected) {
+      return `<option value="${escAttr(value)}" ${selected ? 'selected' : ''}>${escHtml(label)}</option>`
+    }
+    const currentValue = currentOwner ? `${currentOwner.kind}:${currentOwner.id || ''}:${currentOwner.name}` : ''
+    return `
+      <select class="exec-owner-picker">
+        <option value="">— select owner —</option>
+        ${podLeads.length ? `<optgroup label="Team Leads (this pod)">${podLeads.map(l => opt(`lead:${l.id}:${l.name}`, `👑 ${l.name}`, currentValue === `lead:${l.id}:${l.name}`)).join('')}</optgroup>` : ''}
+        ${assignees.length ? `<optgroup label="Pod members">${assignees.map(a => opt(`member::${a}`, a, currentValue === `member::${a}`)).join('')}</optgroup>` : ''}
+        ${otherLeads.length ? `<optgroup label="Other team leads">${otherLeads.map(l => opt(`lead:${l.id}:${l.name}`, `👑 ${l.name}`, currentValue === `lead:${l.id}:${l.name}`)).join('')}</optgroup>` : ''}
+        <option value="__custom__">+ Add custom...</option>
+      </select>
+    `
+  }
+
   function renderEntryList(category, entries, podScope = null) {
+    const pod = podScope ? (settings.pods || []).find(p => p.id === podScope) : null
     return entries.map(e => {
-      const sev = e.severity ? `<span class="exec-sev sev-${e.severity}">${e.severity}</span>` : ''
-      const owner = e.owner ? `<span class="exec-owner">${e.owner.kind === 'lead' ? '👑 ' : ''}${escHtml(e.owner.name)}</span>` : ''
-      const due = e.due ? `<span class="exec-due">due ${escHtml(e.due)}</span>` : ''
+      const sev = (category === 'issues')
+        ? (readonly
+            ? `<span class="exec-sev sev-${e.severity || 'risk'}">${e.severity || 'risk'}</span>`
+            : `<select class="exec-sev-picker" data-entry-id="${escAttr(e.id)}" data-pod="${escAttr(podScope || '_unit')}">
+                <option value="blocker" ${e.severity === 'blocker' ? 'selected' : ''}>blocker</option>
+                <option value="risk"    ${e.severity === 'risk' || !e.severity ? 'selected' : ''}>risk</option>
+                <option value="watch"   ${e.severity === 'watch' ? 'selected' : ''}>watch</option>
+              </select>`)
+        : ''
+      const ownerHtml = (category === 'issues' || category === 'actions') && pod
+        ? renderOwnerPicker(pod, e.owner, readonly)
+        : ''
+      const dueHtml = (category === 'actions')
+        ? (readonly
+            ? `<span class="exec-due">${escHtml(e.due || 'this-week')}</span>`
+            : `<select class="exec-due-picker" data-entry-id="${escAttr(e.id)}" data-pod="${escAttr(podScope || '_unit')}">
+                <option value="this-week" ${e.due === 'this-week' ? 'selected' : ''}>this week</option>
+                <option value="next-week" ${e.due === 'next-week' ? 'selected' : ''}>next week</option>
+              </select>`)
+        : ''
       const carried = e.carriedFrom ? `<span class="exec-carried">↻ carried from ${escHtml(e.carriedFrom)}</span>` : ''
-      const needs = e.needsFromLeadership ? `<span class="exec-needs">NEEDS LEADERSHIP</span>` : ''
+      const needs = (category === 'issues' && !readonly)
+        ? `<label class="exec-needs-label"><input type="checkbox" class="exec-needs-cb" data-entry-id="${escAttr(e.id)}" data-pod="${escAttr(podScope || '_unit')}" ${e.needsFromLeadership ? 'checked' : ''}/> Needs leadership</label>`
+        : (e.needsFromLeadership ? `<span class="exec-needs">NEEDS LEADERSHIP</span>` : '')
       const sourceChip = e.sourcePodId ? `<span class="exec-source">from ${escHtml(podNameById(e.sourcePodId))}</span>` : ''
+      const promoteBtn = (podScope && !readonly && (category === 'progress' || category === 'issues' || category === 'actions'))
+        ? `<button class="exec-promote-btn" data-entry-id="${escAttr(e.id)}" data-pod="${escAttr(podScope)}" data-category="${category}" title="Promote to Unit Headline">↑</button>`
+        : ''
       const del = readonly ? '' : `<button class="exec-entry-del" data-entry-id="${escAttr(e.id)}" data-category="${category}" data-pod="${podScope || '_unit'}">×</button>`
       return `<li class="exec-entry" data-entry-id="${escAttr(e.id)}">
         ${sev}<span class="exec-entry-text" contenteditable="${!readonly}">${escHtml(e.text)}</span>
-        ${owner}${due}${carried}${needs}${sourceChip}${del}
+        ${ownerHtml}${dueHtml}${carried}${needs}${sourceChip}${promoteBtn}${del}
       </li>`
     }).join('')
   }
@@ -1562,6 +1610,60 @@ async function buildExecutiveSummaryPanel(cachedData, settings, sortedPods) {
       wu.pods[podId].suggestionsState.dismissed.push(key)
       await persistWu()
       buildExecutiveSummaryPanel(cachedData, settings, sortedPods)
+    })
+  })
+
+  function findEntry(podScope, entryId, category) {
+    const list = podScope === '_unit'
+      ? wu.unitHeadline[category === 'progress' ? 'wins' : category]
+      : wu.pods[podScope]?.[category]
+    return list?.find(e => e.id === entryId)
+  }
+
+  panel.querySelectorAll('.exec-owner-picker').forEach(sel => {
+    sel.addEventListener('change', async (e) => {
+      const li = sel.closest('.exec-entry')
+      const entryId = li.dataset.entryId
+      const podScope = li.closest('[data-pod]')?.dataset.pod || '_unit'
+      const block = li.closest('.exec-headline-block')
+      const labelText = block.querySelector('.exec-headline-label').textContent.trim().toLowerCase()
+      const category = labelText.startsWith('issue') ? 'issues' : labelText.startsWith('action') ? 'actions' : 'progress'
+      const entry = findEntry(podScope, entryId, category)
+      if (!entry) return
+      let val = sel.value
+      if (val === '__custom__') {
+        const name = prompt('Custom owner name:')
+        if (!name) { sel.value = ''; return }
+        entry.owner = { kind: 'custom', name: name.trim() }
+      } else if (val === '') {
+        entry.owner = null
+      } else {
+        const [kind, id, name] = val.split(':')
+        entry.owner = { kind, id: id || undefined, name }
+      }
+      await persistWu()
+      buildExecutiveSummaryPanel(cachedData, settings, sortedPods)
+    })
+  })
+
+  panel.querySelectorAll('.exec-sev-picker').forEach(sel => {
+    sel.addEventListener('change', async () => {
+      const entry = findEntry(sel.dataset.pod, sel.dataset.entryId, 'issues')
+      if (entry) { entry.severity = sel.value; await persistWu() }
+    })
+  })
+
+  panel.querySelectorAll('.exec-due-picker').forEach(sel => {
+    sel.addEventListener('change', async () => {
+      const entry = findEntry(sel.dataset.pod, sel.dataset.entryId, 'actions')
+      if (entry) { entry.due = sel.value; await persistWu() }
+    })
+  })
+
+  panel.querySelectorAll('.exec-needs-cb').forEach(cb => {
+    cb.addEventListener('change', async () => {
+      const entry = findEntry(cb.dataset.pod, cb.dataset.entryId, 'issues')
+      if (entry) { entry.needsFromLeadership = cb.checked; await persistWu() }
     })
   })
 }
