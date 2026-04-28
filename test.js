@@ -355,6 +355,8 @@ test('pod with Resolved-but-stuck items is at least amber', () => {
   const h = calcPodHealthStatus(pod, 2)
   assert(h.status === 'amber' || h.status === 'red',
     `Expected amber or red, got ${h.status}`)
+  assert(h.reasons.some(r => r.toLowerCase().includes('stale')),
+    `Expected a stale-items reason, got: ${JSON.stringify(h.reasons)}`)
 })
 
 // ─── calcBugRatioTrend ────────────────────────────────────────────────────────
