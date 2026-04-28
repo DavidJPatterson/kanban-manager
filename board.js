@@ -986,7 +986,7 @@ async function buildExecutiveSummaryPanel(cachedData, settings, sortedPods) {
     </div>
   `
 
-  const readonly = isFinalised
+  const readonly = isFinalised && panel.dataset.unlocked !== '1'
   const headline = wu.unitHeadline || { wins: [], issues: [], actions: [] }
 
   function renderOwnerPicker(pod, currentOwner, ro) {
@@ -1474,6 +1474,7 @@ async function buildExecutiveSummaryPanel(cachedData, settings, sortedPods) {
   // Week selector
   panel.querySelector('.exec-week-select')?.addEventListener('change', (e) => {
     panel.dataset.selectedWeek = e.target.value
+    delete panel.dataset.unlocked   // reset unlock when navigating weeks
     buildExecutiveSummaryPanel(cachedData, settings, sortedPods)
   })
   panel.querySelector('.exec-week-prev')?.addEventListener('click', () => {
@@ -1696,6 +1697,43 @@ async function buildExecutiveSummaryPanel(cachedData, settings, sortedPods) {
       await persistWu()
       buildExecutiveSummaryPanel(cachedData, settings, sortedPods)
     })
+  })
+
+  panel.querySelector('.exec-finalise-btn')?.addEventListener('click', async () => {
+    // Hard-block: unitName empty
+    if (!settings.unitName || !settings.unitName.trim()) {
+      alert('Unit Name is required for PDF export. Set it in Options first.')
+      return
+    }
+    // Soft warn: actions without owner
+    const allActions = [
+      ...wu.unitHeadline.actions,
+      ...Object.values(wu.pods).flatMap(p => p.actions || [])
+    ]
+    const ownerless = allActions.filter(a => !a.owner)
+    if (ownerless.length > 0) {
+      if (!confirm(`${ownerless.length} action${ownerless.length === 1 ? '' : 's'} have no owner — proceed anyway?`)) return
+    }
+    wu.finalisedAt = new Date().toISOString()
+    await persistWu()
+    // Open PDF export tab
+    const url = chrome.runtime.getURL('print-export.html') + '?week=' + encodeURIComponent(selectedWeekKey)
+    chrome.tabs.create({ url })
+    buildExecutiveSummaryPanel(cachedData, settings, sortedPods)
+  })
+
+  panel.querySelector('.exec-reexport-btn')?.addEventListener('click', () => {
+    const url = chrome.runtime.getURL('print-export.html') + '?week=' + encodeURIComponent(selectedWeekKey)
+    chrome.tabs.create({ url })
+  })
+
+  panel.querySelector('.exec-unlock-btn')?.addEventListener('click', async () => {
+    const finalisedDate = wu.finalisedAt ? new Date(wu.finalisedAt).toLocaleDateString('en-GB') : ''
+    if (!confirm(`This week was finalised on ${finalisedDate}. Edits will not be re-sent unless you re-export. Continue?`)) return
+    // We do NOT clear finalisedAt — leave the audit trail.
+    // Unlock is a per-render flag instead.
+    panel.dataset.unlocked = '1'
+    buildExecutiveSummaryPanel(cachedData, settings, sortedPods)
   })
 }
 
