@@ -986,6 +986,54 @@ async function buildExecutiveSummaryPanel(cachedData, settings, sortedPods) {
     </div>
   `
 
+  const readonly = isFinalised
+  const headline = wu.unitHeadline || { wins: [], issues: [], actions: [] }
+
+  function renderEntryList(category, entries, podScope = null) {
+    return entries.map(e => {
+      const sev = e.severity ? `<span class="exec-sev sev-${e.severity}">${e.severity}</span>` : ''
+      const owner = e.owner ? `<span class="exec-owner">${e.owner.kind === 'lead' ? '👑 ' : ''}${escHtml(e.owner.name)}</span>` : ''
+      const due = e.due ? `<span class="exec-due">due ${escHtml(e.due)}</span>` : ''
+      const carried = e.carriedFrom ? `<span class="exec-carried">↻ carried from ${escHtml(e.carriedFrom)}</span>` : ''
+      const needs = e.needsFromLeadership ? `<span class="exec-needs">NEEDS LEADERSHIP</span>` : ''
+      const sourceChip = e.sourcePodId ? `<span class="exec-source">from ${escHtml(podNameById(e.sourcePodId))}</span>` : ''
+      const del = readonly ? '' : `<button class="exec-entry-del" data-entry-id="${escAttr(e.id)}" data-category="${category}" data-pod="${podScope || '_unit'}">×</button>`
+      return `<li class="exec-entry" data-entry-id="${escAttr(e.id)}">
+        ${sev}<span class="exec-entry-text" contenteditable="${!readonly}">${escHtml(e.text)}</span>
+        ${owner}${due}${carried}${needs}${sourceChip}${del}
+      </li>`
+    }).join('')
+  }
+
+  function podNameById(id) {
+    const p = (settings.pods || []).find(p => p.id === id)
+    return p ? p.name : id
+  }
+
+  const addBtn = (category) => readonly ? '' :
+    `<button class="exec-headline-add" data-category="${category}">+ add ${category}</button>`
+
+  html += `
+    <div class="exec-unit-headline">
+      <h3>Unit Headline</h3>
+      <div class="exec-headline-block">
+        <div class="exec-headline-label">Wins</div>
+        <ul class="exec-entries">${renderEntryList('wins', headline.wins)}</ul>
+        ${addBtn('wins')}
+      </div>
+      <div class="exec-headline-block">
+        <div class="exec-headline-label">Issues</div>
+        <ul class="exec-entries">${renderEntryList('issues', headline.issues)}</ul>
+        ${addBtn('issues')}
+      </div>
+      <div class="exec-headline-block">
+        <div class="exec-headline-label">Actions for next week</div>
+        <ul class="exec-entries">${renderEntryList('actions', headline.actions)}</ul>
+        ${addBtn('actions')}
+      </div>
+    </div>
+  `
+
   // Aggregate KPIs (last week vs week before)
   function deltaHtml(curr, prev, invertColor) {
     const diff = +(curr - prev).toFixed(1)
@@ -1311,6 +1359,60 @@ async function buildExecutiveSummaryPanel(cachedData, settings, sortedPods) {
     const sel = panel.querySelector('.exec-week-select')
     const idx = sel.selectedIndex
     if (idx > 0) { sel.selectedIndex = idx - 1; sel.dispatchEvent(new Event('change')) }
+  })
+
+  async function persistWu() {
+    await setWeeklyUpdate(selectedWeekKey, wu)
+    const ind = panel.querySelector('.exec-saved-indicator')
+    if (ind) {
+      ind.textContent = 'saved just now'
+      setTimeout(() => { if (ind) ind.textContent = '' }, 3000)
+    }
+  }
+
+  panel.querySelectorAll('.exec-headline-add').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const category = btn.dataset.category
+      const newEntry = { id: crypto.randomUUID(), text: '', workItemIds: [] }
+      if (category === 'issues') Object.assign(newEntry, { severity: 'risk', owner: null, needsFromLeadership: false })
+      if (category === 'actions') Object.assign(newEntry, { owner: null, due: 'this-week', carriedFrom: null })
+      wu.unitHeadline[category].push(newEntry)
+      await persistWu()
+      buildExecutiveSummaryPanel(cachedData, settings, sortedPods)
+    })
+  })
+
+  panel.querySelectorAll('.exec-entry-del').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const id = btn.dataset.entryId
+      const category = btn.dataset.category
+      const pod = btn.dataset.pod
+      const list = pod === '_unit' ? wu.unitHeadline[category] : wu.pods[pod]?.[category === 'wins' ? 'progress' : category]
+      if (!list) return
+      const idx = list.findIndex(e => e.id === id)
+      if (idx >= 0) list.splice(idx, 1)
+      await persistWu()
+      buildExecutiveSummaryPanel(cachedData, settings, sortedPods)
+    })
+  })
+
+  // Auto-save on text edits (contenteditable blur)
+  panel.querySelectorAll('.exec-entry-text').forEach(el => {
+    el.addEventListener('blur', async () => {
+      const li = el.closest('.exec-entry')
+      const id = li?.dataset.entryId
+      if (!id) return
+      // Find the entry in any list and update its text
+      const lists = [
+        ...['wins', 'issues', 'actions'].map(c => wu.unitHeadline[c]),
+        ...Object.values(wu.pods || {}).flatMap(p => [p.progress, p.issues, p.actions])
+      ]
+      for (const list of lists) {
+        const e = list.find(x => x.id === id)
+        if (e) { e.text = el.textContent.trim(); break }
+      }
+      await persistWu()
+    })
   })
 }
 
