@@ -712,18 +712,30 @@ test('does not match when text differs', () => {
   assertEqual(r[0].carriedFrom, null)
 })
 
-test('preserves existing carriedFrom from earlier week (chain)', () => {
+test('sets carriedFrom when prior action has its own chain', () => {
+  // Even when prev's action was already carried from W15, the current
+  // action's carriedFrom should reflect the *immediately prior* week (W16).
   const prev = [{ id: 'p1', text: 'Triage QA backlog', carriedFrom: '2026-W15' }]
   const curr = [{ id: 'c1', text: 'Triage QA backlog', carriedFrom: null }]
   const r = detectCarryOver(curr, prev, '2026-W16')
   assertEqual(r[0].carriedFrom, '2026-W16')
 })
 
+test('overwrites a stale carriedFrom on the current action', () => {
+  // detectCarryOver always sets carriedFrom to the immediately prior week
+  // when a match is found, regardless of any pre-existing value on the current action.
+  const prev = [{ id: 'p1', text: 'Triage QA backlog' }]
+  const curr = [{ id: 'c1', text: 'Triage QA backlog', carriedFrom: '2026-W12' }]
+  const r = detectCarryOver(curr, prev, '2026-W16')
+  assertEqual(r[0].carriedFrom, '2026-W16',
+    'Pre-existing stale carriedFrom should be overwritten with the immediate prior week')
+})
+
 group('carryChainLength')
 
 test('returns 0 for action not carried over', () => {
   const action = { id: 'a1', text: 't', carriedFrom: null }
-  assertEqual(carryChainLength(action, {}), 0)
+  assertEqual(carryChainLength(action, {}, 'p1'), 0)
 })
 
 test('returns 1 for action carried from one prior week', () => {
@@ -731,7 +743,7 @@ test('returns 1 for action carried from one prior week', () => {
   const allWeeks = {
     '2026-W16': { pods: { p1: { actions: [{ id: 'a0', text: 'X', carriedFrom: null }] } } }
   }
-  assertEqual(carryChainLength(action, allWeeks), 1)
+  assertEqual(carryChainLength(action, allWeeks, 'p1'), 1)
 })
 
 test('returns 2 for two-week chain', () => {
@@ -740,7 +752,19 @@ test('returns 2 for two-week chain', () => {
     '2026-W16': { pods: { p1: { actions: [{ id: 'a0', text: 'X', carriedFrom: '2026-W15' }] } } },
     '2026-W15': { pods: { p1: { actions: [{ id: 'a-1', text: 'X', carriedFrom: null }] } } }
   }
-  assertEqual(carryChainLength(action, allWeeks), 2)
+  assertEqual(carryChainLength(action, allWeeks, 'p1'), 2)
+})
+
+test('does not chain across pods with identical action text', () => {
+  const action = { id: 'a1', text: 'Triage backlog', carriedFrom: '2026-W16' }
+  const allWeeks = {
+    '2026-W16': { pods: {
+      p2: { actions: [{ id: 'a0', text: 'Triage backlog', carriedFrom: null }] }
+      // note: p1 has no matching action
+    } }
+  }
+  assertEqual(carryChainLength(action, allWeeks, 'p1'), 0,
+    'Pod p1 chain should not pick up Pod p2 actions even with identical text')
 })
 
 // ─── Render Results ───────────────────────────────────────────────────────────

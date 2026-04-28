@@ -116,20 +116,17 @@ function detectCarryOver(currentActions, prevWeekActions, prevWeekKey) {
 }
 
 // Walk backwards through allWeeklyUpdates following carriedFrom links;
-// returns the count of consecutive prior weeks that contain the same text.
-function carryChainLength(action, allWeeklyUpdates) {
+// returns the count of consecutive prior weeks that contain the same text
+// for the SAME pod. Cross-pod text collisions are intentionally ignored —
+// a chain is per-pod state, not a global text match.
+function carryChainLength(action, allWeeklyUpdates, podId) {
   let length = 0
-  let textKey = _normaliseActionText(action.text)
+  const textKey = _normaliseActionText(action.text)
   let prevKey = action.carriedFrom
   while (prevKey && allWeeklyUpdates[prevKey]) {
     const prevWeek = allWeeklyUpdates[prevKey]
-    let foundInPrev = null
-    for (const podId of Object.keys(prevWeek.pods || {})) {
-      for (const prev of (prevWeek.pods[podId].actions || [])) {
-        if (_normaliseActionText(prev.text) === textKey) { foundInPrev = prev; break }
-      }
-      if (foundInPrev) break
-    }
+    const prevActions = prevWeek.pods?.[podId]?.actions || []
+    const foundInPrev = prevActions.find(prev => _normaliseActionText(prev.text) === textKey)
     if (!foundInPrev) break
     length++
     prevKey = foundInPrev.carriedFrom
