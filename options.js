@@ -41,6 +41,39 @@ function escAttr(s) {
   return (s || '').replace(/"/g, '&quot;').replace(/</g, '&lt;');
 }
 
+// ─── Team Leads rendering ─────────────────────────────────────────────────────
+
+function renderTeamLeads(settings) {
+  const container = $('team-leads-list')
+  container.innerHTML = ''
+  const pods = settings.pods || []
+  for (const lead of (settings.teamLeads || [])) {
+    const podOptions = pods.map(p =>
+      `<option value="${escAttr(p.id)}"${lead.podIds && lead.podIds.includes(p.id) ? ' selected' : ''}>${escAttr(p.name)}</option>`
+    ).join('')
+    const row = document.createElement('div')
+    row.className = 'team-lead-row'
+    row.dataset.leadId = lead.id
+    row.innerHTML = `
+      <input class="lead-name" type="text" value="${escAttr(lead.name)}" placeholder="Name" />
+      <input class="lead-email" type="email" value="${escAttr(lead.email || '')}" placeholder="Email (optional)" />
+      <select class="lead-pods" multiple size="3">${podOptions}</select>
+      <button class="lead-delete" type="button">✕</button>
+    `
+    container.appendChild(row)
+  }
+}
+
+function collectTeamLeadsFromDOM(settings) {
+  const rows = document.querySelectorAll('#team-leads-list .team-lead-row')
+  settings.teamLeads = Array.from(rows).map(row => ({
+    id: row.dataset.leadId,
+    name: row.querySelector('.lead-name').value.trim(),
+    email: row.querySelector('.lead-email').value.trim(),
+    podIds: Array.from(row.querySelector('.lead-pods').selectedOptions).map(o => o.value)
+  })).filter(l => l.name)
+}
+
 function readPods() {
   return Array.from($('pods-list').querySelectorAll('.pod-row')).map(row => ({
     id: row.dataset.podId || ('pod-' + Date.now().toString(36)),
@@ -67,6 +100,7 @@ document.addEventListener('DOMContentLoaded', () => {
     $('refreshInterval').value = String(s.refreshInterval || 15);
     $('staleDays').value = String(s.staleDays || 2);
     renderPodList(s.pods || []);
+    renderTeamLeads(s);
 
     // Executive summary toggle
     $('exec-summary').checked = !!s.executiveSummary;
@@ -120,6 +154,30 @@ document.addEventListener('DOMContentLoaded', () => {
     list.appendChild(row);
     row.querySelector('.pod-name-input').focus();
   });
+
+  document.getElementById('add-team-lead-btn').addEventListener('click', () => {
+    const currentPods = readPods();
+    const podOptions = currentPods.map(p =>
+      `<option value="${escAttr(p.id)}">${escAttr(p.name)}</option>`
+    ).join('');
+    const row = document.createElement('div');
+    row.className = 'team-lead-row';
+    row.dataset.leadId = 'lead-' + Date.now().toString(36);
+    row.innerHTML = `
+      <input class="lead-name" type="text" value="" placeholder="Name" />
+      <input class="lead-email" type="email" value="" placeholder="Email (optional)" />
+      <select class="lead-pods" multiple size="3">${podOptions}</select>
+      <button class="lead-delete" type="button">✕</button>
+    `;
+    $('team-leads-list').appendChild(row);
+    row.querySelector('.lead-name').focus();
+  });
+
+  $('team-leads-list').addEventListener('click', e => {
+    if (!e.target.classList.contains('lead-delete')) return;
+    const row = e.target.closest('.team-lead-row');
+    if (row) row.remove();
+  });
 });
 
 // ─── Save ─────────────────────────────────────────────────────────────────────
@@ -152,6 +210,7 @@ function save() {
       cfdChart: $('cfd-chart').checked
     }
   };
+  collectTeamLeadsFromDOM(settings);
 
   if (!settings.org || !settings.project) {
     setStatus('Organisation and Project are required.', false); return;

@@ -87,6 +87,28 @@
   }
   .add-pod-btn:hover { background: rgba(59,130,246,.2); }
 
+  /* Team Leads list */
+  #team-leads-list { display: flex; flex-direction: column; gap: 0.6rem; margin-bottom: 0.75rem; }
+  .team-lead-row {
+    display: flex; align-items: flex-start; gap: 0.5rem; flex-wrap: wrap;
+    background: var(--input-bg); border: 1px solid var(--border); border-radius: 8px; padding: 0.5rem 0.6rem;
+  }
+  .team-lead-row input { background: transparent; border: none; padding: 0.2rem 0.4rem; font-size: 0.875rem; color: var(--text); }
+  .team-lead-row input:focus { border-bottom: 1px solid #3b82f6; outline: none; }
+  .lead-name { width: 140px; flex-shrink: 0; font-weight: 600; }
+  .lead-email { flex: 1; min-width: 160px; color: var(--muted); }
+  .lead-pods {
+    width: 100%; background: var(--input-bg); border: 1px solid var(--border);
+    color: var(--text); border-radius: 6px; padding: 0.2rem 0.4rem;
+    font-size: 0.8rem; margin-top: 0.25rem;
+  }
+  .lead-pods option { padding: 0.15rem 0.4rem; }
+  .lead-delete {
+    background: none; border: none; color: var(--muted); cursor: pointer;
+    font-size: 1rem; padding: 0.1rem 0.3rem; border-radius: 4px; flex-shrink: 0;
+  }
+  .lead-delete:hover { color: #ef4444; background: rgba(239,68,68,.1); }
+
   /* Chart toggles */
   .chart-toggles { display: flex; flex-direction: column; gap: 0.5rem; margin-bottom: 0.5rem; }
   .chart-toggle {
@@ -198,6 +220,15 @@
       <p class="hint" style="margin-bottom:0.75rem">Each pod maps to an ADO area path. Add one row per team you want to track.</p>
       <div id="pods-list"></div>
       <button class="add-pod-btn" id="add-pod-btn">+ Add Pod</button>
+
+      <div class="section-sep"></div>
+
+      <div class="section-title">
+        <span>Team Leads</span>
+      </div>
+      <p class="hint" style="margin-bottom:0.75rem">Authoritative owners of actions on the weekly status update. One lead can cover multiple pods.</p>
+      <div id="team-leads-list"></div>
+      <button class="add-pod-btn" id="add-team-lead-btn">+ Add Team Lead</button>
     </div>
 
     <!-- Right column: Charts -->
