@@ -140,6 +140,18 @@ function carryChainLength(action, allWeeklyUpdates, podId) {
 // where Suggestion = { key: string, type: 'positive'|'warning'|'blocker'|'info', text: string }
 //
 // Wraps existing calc* functions; thresholds match calcExecInsights.
+//
+// Param notes:
+//   _cachedData — reserved for pod-health history (predictability / health-drop
+//                 suggestions). Deferred to a follow-up task.
+//   _holidays   — reserved for holiday-adjusted throughput baseline. Deferred.
+//
+// Spec deviations to address in a follow-up:
+//   - win-zero-aged currently fires whenever today's aged count is zero.
+//     Spec §6.3 says it should only fire when the prior week had ≥ 3 aged
+//     items. Implementing that gate requires access to allWeeklyUpdates
+//     (or last-week's pod data); deferred until the function signature is
+//     extended.
 function buildSuggestions(pod, _cachedData, settings, _holidays) {
   const items = pod.items || []
   const wins = []
@@ -148,19 +160,22 @@ function buildSuggestions(pod, _cachedData, settings, _holidays) {
   const staleDays = settings.staleDays || 2
 
   // — Throughput trend —
+  // Compare last completed week vs the 4 weeks immediately preceding it.
+  // calcWeeklyThroughput always returns 8 buckets oldest-first; tp[6] is the
+  // last completed week (tp[7] is the current incomplete one). The 4-week
+  // baseline is buckets [2..5] inclusive, i.e. tp.slice(-6, -2).
   const tp = calcWeeklyThroughput(items, 8)
-  if (tp.length >= 5) {
-    const last = tp[tp.length - 2]?.count || 0
-    const baseline = tp.slice(0, -2).reduce((s, w) => s + w.count, 0) / (tp.length - 2)
-    if (baseline > 0) {
-      const delta = (last - baseline) / baseline
-      if (delta >= 0.25) {
-        wins.push({ key: 'win-throughput-up', type: 'positive',
-          text: `Throughput up ${Math.round(delta * 100)}% vs 4-wk baseline (${last} vs ${baseline.toFixed(1)})` })
-      } else if (delta <= -0.25) {
-        issues.push({ key: 'issue-throughput-down', type: 'warning',
-          text: `Throughput down ${Math.round(Math.abs(delta) * 100)}% vs 4-wk baseline (${last} vs ${baseline.toFixed(1)})` })
-      }
+  const baselineBuckets = tp.slice(-6, -2)
+  const baseline = baselineBuckets.reduce((s, w) => s + w.count, 0) / 4
+  const last = tp[tp.length - 2]?.count || 0
+  if (baseline > 0) {
+    const delta = (last - baseline) / baseline
+    if (delta >= 0.25) {
+      wins.push({ key: 'win-throughput-up', type: 'positive',
+        text: `Throughput up ${Math.round(delta * 100)}% vs 4-wk baseline (${last} vs ${baseline.toFixed(1)})` })
+    } else if (delta <= -0.25) {
+      issues.push({ key: 'issue-throughput-down', type: 'warning',
+        text: `Throughput down ${Math.round(Math.abs(delta) * 100)}% vs 4-wk baseline (${last} vs ${baseline.toFixed(1)})` })
     }
   }
 
@@ -180,7 +195,9 @@ function buildSuggestions(pod, _cachedData, settings, _holidays) {
   }
 
   // — Aged > 7d —
-  const aged = items.filter(i => !['Closed', 'Removed'].includes(i.state)).filter(i => {
+  // Use the same in-scope state set as the stale-item calc so the count
+  // and the per-item triage actions stay consistent.
+  const aged = items.filter(i => !NON_STALE_STATES.has(i.state)).filter(i => {
     const created = i.arrivedAt || i.created
     return created && (Date.now() - new Date(created).getTime()) >= 7 * 86400000
   })

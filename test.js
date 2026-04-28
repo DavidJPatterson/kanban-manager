@@ -772,18 +772,23 @@ test('does not chain across pods with identical action text', () => {
 group('buildSuggestions — keys are deterministic')
 
 test('throughput-up suggestion has stable key', () => {
-  const pod = {
-    id: 'p1', name: 'Pod A',
-    items: Array.from({ length: 8 }, (_, i) => makeItem({
-      id: i, type: 'User Story', state: 'Closed',
-      closed: daysAgo(i < 4 ? 2 : 30)  // 4 closed last week, baseline lower in older weeks
-    }))
+  // Throughput pattern: 1 item closed each in older weeks 1-6, 4 items in last completed week.
+  // baseline = 6 / 4 = 1.5 (using last 4 of those 6), last = 4 → +166% triggers win.
+  const items = []
+  for (let i = 0; i < 4; i++) {
+    items.push(makeItem({ id: `last-${i}`, type: 'User Story', state: 'Closed', closed: daysAgo(8) }))
   }
+  for (let i = 0; i < 4; i++) {
+    items.push(makeItem({ id: `bw-${i}`, type: 'User Story', state: 'Closed', closed: daysAgo(15 + i * 7) }))
+  }
+  const pod = { id: 'p1', name: 'Pod A', items }
   const s1 = buildSuggestions(pod, {}, { staleDays: 2 }, {})
   const s2 = buildSuggestions(pod, {}, { staleDays: 2 }, {})
   const keys1 = s1.wins.concat(s1.issues, s1.actions).map(x => x.key).sort()
   const keys2 = s2.wins.concat(s2.issues, s2.actions).map(x => x.key).sort()
   assertEqual(JSON.stringify(keys1), JSON.stringify(keys2))
+  assert(s1.wins.some(w => w.key === 'win-throughput-up'),
+    `Expected win-throughput-up to fire on this fixture; got: ${JSON.stringify(s1.wins.map(w => w.key))}`)
 })
 
 test('suggested action for stale item uses item id in key', () => {
