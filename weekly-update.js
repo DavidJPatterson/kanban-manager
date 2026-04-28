@@ -48,6 +48,12 @@ function getLastCompletedWeekKey() {
   return weekKeyFor(sevenDaysAgo)
 }
 
+function previousIsoWeekKey(weekKey) {
+  const r = weekRange(weekKey)
+  const d = new Date(r.start.getTime() - 86400000)  // 1 day before Monday → previous week
+  return weekKeyFor(d)
+}
+
 // ─── Storage helpers ──────────────────────────────────────────────────────────
 
 function emptyWeekShape(weekKey) {

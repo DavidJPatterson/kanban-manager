@@ -1231,6 +1231,38 @@ async function buildExecutiveSummaryPanel(cachedData, settings, sortedPods) {
         <div class="exec-pod-body${isPaused ? ' collapsed' : ''}" data-exec-body="${escHtml(pod.id)}">
     `
 
+    // Lazy-init pod entry shape for this week
+    if (!wu.pods[pod.id]) wu.pods[pod.id] = emptyPodShape()
+    const pe = wu.pods[pod.id]
+
+    const stickyDis = readonly ? 'disabled' : ''
+
+    html += `
+  <div class="exec-pod-update" data-pod="${escAttr(pod.id)}">
+    <label class="exec-steady-label">
+      <input type="checkbox" class="exec-steady" ${stickyDis} ${pe.steady ? 'checked' : ''}/>
+      Mark steady this week
+    </label>
+    <div class="exec-pod-update-body" ${pe.steady ? 'style="opacity:.5"' : ''}>
+      <div class="exec-headline-block">
+        <div class="exec-headline-label">Progress</div>
+        <ul class="exec-entries">${renderEntryList('progress', pe.progress, pod.id)}</ul>
+        ${readonly ? '' : `<button class="exec-pod-add" data-category="progress" data-pod="${escAttr(pod.id)}">+ add</button>`}
+      </div>
+      <div class="exec-headline-block">
+        <div class="exec-headline-label">Issues</div>
+        <ul class="exec-entries">${renderEntryList('issues', pe.issues, pod.id)}</ul>
+        ${readonly ? '' : `<button class="exec-pod-add" data-category="issues" data-pod="${escAttr(pod.id)}">+ add</button>`}
+      </div>
+      <div class="exec-headline-block">
+        <div class="exec-headline-label">Actions</div>
+        <ul class="exec-entries">${renderEntryList('actions', pe.actions, pod.id)}</ul>
+        ${readonly ? '' : `<button class="exec-pod-add" data-category="actions" data-pod="${escAttr(pod.id)}">+ add</button>`}
+      </div>
+    </div>
+  </div>
+`
+
     // Per-pod insights (health traffic light stays as the dot, text alerts come from insights only)
     if (pInsights.length) {
       html += '<div class="exec-risks">'
@@ -1412,6 +1444,36 @@ async function buildExecutiveSummaryPanel(cachedData, settings, sortedPods) {
         if (e) { e.text = el.textContent.trim(); break }
       }
       await persistWu()
+    })
+  })
+
+  panel.querySelectorAll('.exec-pod-add').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const podId = btn.dataset.pod
+      const category = btn.dataset.category
+      const list = wu.pods[podId][category]
+      const newEntry = { id: crypto.randomUUID(), text: '', workItemIds: [] }
+      if (category === 'issues') Object.assign(newEntry, { severity: 'risk', owner: null, needsFromLeadership: false })
+      if (category === 'actions') {
+        Object.assign(newEntry, { owner: null, due: 'this-week', carriedFrom: null })
+        // Carry-over detection on save
+        const prevKey = previousIsoWeekKey(selectedWeekKey)
+        const prevWu = await getWeeklyUpdate(prevKey)
+        const prevActions = (prevWu.pods?.[podId]?.actions) || []
+        detectCarryOver([newEntry], prevActions, prevKey)
+      }
+      list.push(newEntry)
+      await persistWu()
+      buildExecutiveSummaryPanel(cachedData, settings, sortedPods)
+    })
+  })
+
+  panel.querySelectorAll('.exec-steady').forEach(cb => {
+    cb.addEventListener('change', async () => {
+      const podId = cb.closest('.exec-pod-update').dataset.pod
+      wu.pods[podId].steady = cb.checked
+      await persistWu()
+      buildExecutiveSummaryPanel(cachedData, settings, sortedPods)
     })
   })
 }
