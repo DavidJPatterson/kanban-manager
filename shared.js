@@ -2124,6 +2124,7 @@ function renderStaleItemsTable(container, staleData) {
       <td style="padding:4px 6px;font-size:.75rem;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escSvg(d.title)}</td>
       <td style="padding:4px 6px;font-size:.75rem;color:var(--muted, #94a3b8)">${escSvg(d.assignee || 'Unassigned')}</td>
       <td style="padding:4px 6px;font-size:.75rem;color:var(--muted, #94a3b8)">${escSvg(d.boardColumn)}</td>
+      <td style="padding:4px 6px;font-size:.75rem">${escSvg(d.currentState || '')}</td>
       <td style="padding:4px 6px;font-size:.75rem;font-weight:600;color:${daysColor}">${d.staleDaysActual}d</td>
     </tr>`
   }).join('')
@@ -2136,6 +2137,7 @@ function renderStaleItemsTable(container, staleData) {
         <th style="padding:4px 6px;font-size:.65rem;text-align:left;color:var(--muted, #94a3b8);font-weight:600">Title</th>
         <th style="padding:4px 6px;font-size:.65rem;text-align:left;color:var(--muted, #94a3b8);font-weight:600">Assignee</th>
         <th style="padding:4px 6px;font-size:.65rem;text-align:left;color:var(--muted, #94a3b8);font-weight:600">Column</th>
+        <th style="padding:4px 6px;font-size:.65rem;text-align:left;color:var(--muted, #94a3b8);font-weight:600">State</th>
         <th style="padding:4px 6px;font-size:.65rem;text-align:left;color:var(--muted, #94a3b8);font-weight:600">Days</th>
       </tr></thead>
       <tbody>${rows}</tbody>

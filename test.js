@@ -339,6 +339,24 @@ test('blocked items in Resolved state included', () => {
   assertEqual(r.blocked, 1)
 })
 
+// ─── calcPodHealthStatus — widened stale ──────────────────────────────────────
+
+group('calcPodHealthStatus — widened stale')
+
+test('pod with Resolved-but-stuck items is at least amber', () => {
+  const pod = {
+    id: 'p1',
+    items: [
+      makeItem({ id: 1, state: 'Resolved', changedDate: daysAgo(10) }),
+      makeItem({ id: 2, state: 'Resolved', changedDate: daysAgo(10) }),
+      makeItem({ id: 3, state: 'Resolved', changedDate: daysAgo(10) })
+    ]
+  }
+  const h = calcPodHealthStatus(pod, 2)
+  assert(h.status === 'amber' || h.status === 'red',
+    `Expected amber or red, got ${h.status}`)
+})
+
 // ─── calcBugRatioTrend ────────────────────────────────────────────────────────
 
 group('calcBugRatioTrend')
