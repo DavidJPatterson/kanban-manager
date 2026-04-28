@@ -21,5 +21,11 @@
       "48": "icons/icon-48.png"
     }
   },
-  "options_page": "options.html"
+  "options_page": "options.html",
+  "web_accessible_resources": [
+    {
+      "resources": ["print-export.html", "print-export.js", "print-export.css", "shared.js", "weekly-update.js"],
+      "matches": ["<all_urls>"]
+    }
+  ]
 }
