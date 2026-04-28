@@ -133,3 +133,74 @@ function carryChainLength(action, allWeeklyUpdates, podId) {
   }
   return length
 }
+
+// ─── Suggestion engine ───────────────────────────────────────────────────────
+
+// Returns { wins: Suggestion[], issues: Suggestion[], actions: Suggestion[] }
+// where Suggestion = { key: string, type: 'positive'|'warning'|'blocker'|'info', text: string }
+//
+// Wraps existing calc* functions; thresholds match calcExecInsights.
+function buildSuggestions(pod, _cachedData, settings, _holidays) {
+  const items = pod.items || []
+  const wins = []
+  const issues = []
+  const actions = []
+  const staleDays = settings.staleDays || 2
+
+  // — Throughput trend —
+  const tp = calcWeeklyThroughput(items, 8)
+  if (tp.length >= 5) {
+    const last = tp[tp.length - 2]?.count || 0
+    const baseline = tp.slice(0, -2).reduce((s, w) => s + w.count, 0) / (tp.length - 2)
+    if (baseline > 0) {
+      const delta = (last - baseline) / baseline
+      if (delta >= 0.25) {
+        wins.push({ key: 'win-throughput-up', type: 'positive',
+          text: `Throughput up ${Math.round(delta * 100)}% vs 4-wk baseline (${last} vs ${baseline.toFixed(1)})` })
+      } else if (delta <= -0.25) {
+        issues.push({ key: 'issue-throughput-down', type: 'warning',
+          text: `Throughput down ${Math.round(Math.abs(delta) * 100)}% vs 4-wk baseline (${last} vs ${baseline.toFixed(1)})` })
+      }
+    }
+  }
+
+  // — Stale items + Triage actions —
+  const stale = calcStaleItems(items, staleDays)
+  if (stale.total > 0) {
+    issues.push({ key: 'issue-stale-count', type: 'warning',
+      text: `${stale.total} stale item${stale.total === 1 ? '' : 's'} (≥ ${staleDays} days no change)` })
+  }
+  for (const it of stale.items) {
+    if (it.staleDaysActual >= 7) {
+      actions.push({
+        key: `action-triage-stale-${it.id}`, type: 'info',
+        text: `Triage stale item: #${it.id} ${it.title || ''}`.trim()
+      })
+    }
+  }
+
+  // — Aged > 7d —
+  const aged = items.filter(i => !['Closed', 'Removed'].includes(i.state)).filter(i => {
+    const created = i.arrivedAt || i.created
+    return created && (Date.now() - new Date(created).getTime()) >= 7 * 86400000
+  })
+  if (aged.length === 0 && items.some(i => i.changedDate)) {
+    wins.push({ key: 'win-zero-aged', type: 'positive', text: 'Zero items aged >7 days' })
+  } else if (aged.length > 0) {
+    issues.push({ key: 'issue-aged-count', type: 'warning',
+      text: `${aged.length} item${aged.length === 1 ? '' : 's'} aged >7 days` })
+  }
+
+  // — P1/P2 unassigned —
+  for (const i of items) {
+    if (!['Closed', 'Removed'].includes(i.state) &&
+        (i.priority === 1 || i.priority === 2) && !i.assignee) {
+      actions.push({
+        key: `action-assign-owner-${i.id}`, type: 'info',
+        text: `Assign owner to P${i.priority}: #${i.id} ${i.title || ''}`.trim()
+      })
+    }
+  }
+
+  return { wins, issues, actions }
+}

@@ -767,6 +767,45 @@ test('does not chain across pods with identical action text', () => {
     'Pod p1 chain should not pick up Pod p2 actions even with identical text')
 })
 
+// ─── weekly-update: suggestion engine ────────────────────────────────────────
+
+group('buildSuggestions — keys are deterministic')
+
+test('throughput-up suggestion has stable key', () => {
+  const pod = {
+    id: 'p1', name: 'Pod A',
+    items: Array.from({ length: 8 }, (_, i) => makeItem({
+      id: i, type: 'User Story', state: 'Closed',
+      closed: daysAgo(i < 4 ? 2 : 30)  // 4 closed last week, baseline lower in older weeks
+    }))
+  }
+  const s1 = buildSuggestions(pod, {}, { staleDays: 2 }, {})
+  const s2 = buildSuggestions(pod, {}, { staleDays: 2 }, {})
+  const keys1 = s1.wins.concat(s1.issues, s1.actions).map(x => x.key).sort()
+  const keys2 = s2.wins.concat(s2.issues, s2.actions).map(x => x.key).sort()
+  assertEqual(JSON.stringify(keys1), JSON.stringify(keys2))
+})
+
+test('suggested action for stale item uses item id in key', () => {
+  const pod = {
+    id: 'p1', name: 'Pod A',
+    items: [makeItem({ id: 4521, state: 'Active', changedDate: daysAgo(8) })]
+  }
+  const s = buildSuggestions(pod, {}, { staleDays: 2 }, {})
+  const triage = s.actions.find(a => a.key === 'action-triage-stale-4521')
+  assert(triage, 'Expected action with key action-triage-stale-4521')
+})
+
+test('suggested action for unassigned P1/P2 uses item id', () => {
+  const pod = {
+    id: 'p1', name: 'Pod A',
+    items: [makeItem({ id: 9999, state: 'Active', priority: 1, assignee: null })]
+  }
+  const s = buildSuggestions(pod, {}, { staleDays: 2 }, {})
+  const assn = s.actions.find(a => a.key === 'action-assign-owner-9999')
+  assert(assn, 'Expected assign-owner suggestion for unassigned P1 item')
+})
+
 // ─── Render Results ───────────────────────────────────────────────────────────
 
 ;(() => {
