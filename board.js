@@ -1434,14 +1434,36 @@ async function buildExecutiveSummaryPanel(cachedData, settings, sortedPods) {
       const li = el.closest('.exec-entry')
       const id = li?.dataset.entryId
       if (!id) return
-      // Find the entry in any list and update its text
-      const lists = [
-        ...['wins', 'issues', 'actions'].map(c => wu.unitHeadline[c]),
-        ...Object.values(wu.pods || {}).flatMap(p => [p.progress, p.issues, p.actions])
+      // Search structure: { list, category, podId } so we know context after match
+      const searchSpaces = [
+        ...['wins', 'issues', 'actions'].map(c => ({ list: wu.unitHeadline[c], category: c, podId: null })),
+        ...Object.entries(wu.pods || {}).flatMap(([podId, p]) => [
+          { list: p.progress, category: 'progress', podId },
+          { list: p.issues,   category: 'issues',   podId },
+          { list: p.actions,  category: 'actions',  podId }
+        ])
       ]
-      for (const list of lists) {
-        const e = list.find(x => x.id === id)
-        if (e) { e.text = el.textContent.trim(); break }
+      let matchedEntry = null
+      let matchedCategory = null
+      let matchedPodId = null
+      for (const space of searchSpaces) {
+        const e = space.list.find(x => x.id === id)
+        if (e) {
+          e.text = el.textContent.trim()
+          matchedEntry = e
+          matchedCategory = space.category
+          matchedPodId = space.podId
+          break
+        }
+      }
+      // Re-run carry-over detection for per-pod action entries with non-empty text
+      if (matchedEntry && matchedCategory === 'actions' && matchedPodId && matchedEntry.text) {
+        const prevKey = previousIsoWeekKey(selectedWeekKey)
+        const prevWu = await getWeeklyUpdate(prevKey)
+        const prevActions = (prevWu.pods?.[matchedPodId]?.actions) || []
+        // Reset carriedFrom before re-detecting — text may have changed away from the prior match
+        matchedEntry.carriedFrom = null
+        detectCarryOver([matchedEntry], prevActions, prevKey)
       }
       await persistWu()
     })
