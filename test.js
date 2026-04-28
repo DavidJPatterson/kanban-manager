@@ -687,6 +687,62 @@ test('label is human-readable', () => {
   assert(r.label.includes('26'), `Label should include 26, got: ${r.label}`)
 })
 
+// ─── weekly-update: carry-over ────────────────────────────────────────────────
+
+group('detectCarryOver')
+
+test('matches identical action text case-insensitively', () => {
+  const prev = [{ id: 'p1', text: 'Triage QA backlog', owner: null, due: 'this-week' }]
+  const curr = [{ id: 'c1', text: 'TRIAGE QA BACKLOG', owner: null, due: 'this-week', carriedFrom: null }]
+  const r = detectCarryOver(curr, prev, '2026-W16')
+  assertEqual(r[0].carriedFrom, '2026-W16')
+})
+
+test('ignores whitespace differences', () => {
+  const prev = [{ id: 'p1', text: '  Triage QA backlog  ', owner: null, due: 'this-week' }]
+  const curr = [{ id: 'c1', text: 'Triage QA backlog', owner: null, due: 'this-week', carriedFrom: null }]
+  const r = detectCarryOver(curr, prev, '2026-W16')
+  assertEqual(r[0].carriedFrom, '2026-W16')
+})
+
+test('does not match when text differs', () => {
+  const prev = [{ id: 'p1', text: 'Triage QA backlog', owner: null, due: 'this-week' }]
+  const curr = [{ id: 'c1', text: 'Different action', owner: null, due: 'this-week', carriedFrom: null }]
+  const r = detectCarryOver(curr, prev, '2026-W16')
+  assertEqual(r[0].carriedFrom, null)
+})
+
+test('preserves existing carriedFrom from earlier week (chain)', () => {
+  const prev = [{ id: 'p1', text: 'Triage QA backlog', carriedFrom: '2026-W15' }]
+  const curr = [{ id: 'c1', text: 'Triage QA backlog', carriedFrom: null }]
+  const r = detectCarryOver(curr, prev, '2026-W16')
+  assertEqual(r[0].carriedFrom, '2026-W16')
+})
+
+group('carryChainLength')
+
+test('returns 0 for action not carried over', () => {
+  const action = { id: 'a1', text: 't', carriedFrom: null }
+  assertEqual(carryChainLength(action, {}), 0)
+})
+
+test('returns 1 for action carried from one prior week', () => {
+  const action = { id: 'a1', text: 'X', carriedFrom: '2026-W16' }
+  const allWeeks = {
+    '2026-W16': { pods: { p1: { actions: [{ id: 'a0', text: 'X', carriedFrom: null }] } } }
+  }
+  assertEqual(carryChainLength(action, allWeeks), 1)
+})
+
+test('returns 2 for two-week chain', () => {
+  const action = { id: 'a1', text: 'X', carriedFrom: '2026-W16' }
+  const allWeeks = {
+    '2026-W16': { pods: { p1: { actions: [{ id: 'a0', text: 'X', carriedFrom: '2026-W15' }] } } },
+    '2026-W15': { pods: { p1: { actions: [{ id: 'a-1', text: 'X', carriedFrom: null }] } } }
+  }
+  assertEqual(carryChainLength(action, allWeeks), 2)
+})
+
 // ─── Render Results ───────────────────────────────────────────────────────────
 
 ;(() => {

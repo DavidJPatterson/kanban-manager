@@ -96,3 +96,43 @@ function listWeeks() {
     return [...keys].sort().reverse()
   })
 }
+
+// ─── Carry-over detection ────────────────────────────────────────────────────
+
+function _normaliseActionText(s) {
+  return (s || '').trim().toLowerCase()
+}
+
+// Mutates each action in `currentActions` to set carriedFrom = prevWeekKey
+// when the same text appears in `prevWeekActions` (case-insensitive, trimmed).
+function detectCarryOver(currentActions, prevWeekActions, prevWeekKey) {
+  const prevTexts = new Set((prevWeekActions || []).map(a => _normaliseActionText(a.text)))
+  for (const a of currentActions) {
+    if (prevTexts.has(_normaliseActionText(a.text))) {
+      a.carriedFrom = prevWeekKey
+    }
+  }
+  return currentActions
+}
+
+// Walk backwards through allWeeklyUpdates following carriedFrom links;
+// returns the count of consecutive prior weeks that contain the same text.
+function carryChainLength(action, allWeeklyUpdates) {
+  let length = 0
+  let textKey = _normaliseActionText(action.text)
+  let prevKey = action.carriedFrom
+  while (prevKey && allWeeklyUpdates[prevKey]) {
+    const prevWeek = allWeeklyUpdates[prevKey]
+    let foundInPrev = null
+    for (const podId of Object.keys(prevWeek.pods || {})) {
+      for (const prev of (prevWeek.pods[podId].actions || [])) {
+        if (_normaliseActionText(prev.text) === textKey) { foundInPrev = prev; break }
+      }
+      if (foundInPrev) break
+    }
+    if (!foundInPrev) break
+    length++
+    prevKey = foundInPrev.carriedFrom
+  }
+  return length
+}
