@@ -7,29 +7,44 @@ const WEEKLY_UPDATE_STORAGE_KEY = 'weeklyUpdates'
 
 // ─── Week math ────────────────────────────────────────────────────────────────
 
-// Returns the ISO week key for a date as "YYYY-Www" (e.g. "2026-W17").
+// Returns the Sun-Sat week key for a date as "YYYY-Www" (e.g. "2026-W17").
+// Year and week number are anchored on the Wednesday of the week.
 function weekKeyFor(date) {
   const d = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()))
-  // ISO week: shift to Thursday of the same week, then compute year and week
-  d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay() || 7))
-  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1))
-  const weekNum = Math.ceil((((d - yearStart) / 86400000) + 1) / 7)
-  return `${d.getUTCFullYear()}-W${String(weekNum).padStart(2, '0')}`
+  // Shift back to the Sunday of this week (Sun=0)
+  d.setUTCDate(d.getUTCDate() - d.getUTCDay())
+  // The week's Wednesday determines the year
+  const wed = new Date(d)
+  wed.setUTCDate(d.getUTCDate() + 3)
+  const year = wed.getUTCFullYear()
+  // Find first Sunday of week 1 in `year` (whose Wednesday is the first Wednesday of `year`)
+  const jan1 = new Date(Date.UTC(year, 0, 1))
+  const jan1Day = jan1.getUTCDay()
+  const offsetToFirstWed = (3 - jan1Day + 7) % 7
+  const firstWed = new Date(jan1)
+  firstWed.setUTCDate(jan1.getUTCDate() + offsetToFirstWed)
+  const week1Sunday = new Date(firstWed)
+  week1Sunday.setUTCDate(firstWed.getUTCDate() - 3)
+  const weekNum = Math.floor((d - week1Sunday) / (7 * 86400000)) + 1
+  return `${year}-W${String(weekNum).padStart(2, '0')}`
 }
 
-// Returns the Monday and Sunday of an ISO week key, plus a display label.
+// Returns the Sunday and Saturday of an Sun-Sat week key, plus a display label.
 function weekRange(weekKey) {
   const m = /^(\d{4})-W(\d{2})$/.exec(weekKey)
   if (!m) throw new Error(`Invalid week key: ${weekKey}`)
   const year = parseInt(m[1], 10)
   const week = parseInt(m[2], 10)
-  // ISO week 1 is the week containing 4 January
-  const jan4 = new Date(Date.UTC(year, 0, 4))
-  const jan4Day = jan4.getUTCDay() || 7
-  const week1Monday = new Date(jan4)
-  week1Monday.setUTCDate(jan4.getUTCDate() - (jan4Day - 1))
-  const start = new Date(week1Monday)
-  start.setUTCDate(week1Monday.getUTCDate() + (week - 1) * 7)
+  // Mirror the anchor logic from weekKeyFor: week 1 is anchored on the first Wednesday of `year`
+  const jan1 = new Date(Date.UTC(year, 0, 1))
+  const jan1Day = jan1.getUTCDay()
+  const offsetToFirstWed = (3 - jan1Day + 7) % 7
+  const firstWed = new Date(jan1)
+  firstWed.setUTCDate(jan1.getUTCDate() + offsetToFirstWed)
+  const week1Sunday = new Date(firstWed)
+  week1Sunday.setUTCDate(firstWed.getUTCDate() - 3)
+  const start = new Date(week1Sunday)
+  start.setUTCDate(week1Sunday.getUTCDate() + (week - 1) * 7)
   const end = new Date(start)
   end.setUTCDate(start.getUTCDate() + 6)
   end.setUTCHours(23, 59, 59, 999)

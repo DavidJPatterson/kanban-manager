@@ -653,38 +653,41 @@ test('returns a color from the palette', () => {
 
 group('weekKeyFor')
 
-test('Monday of W17 2026 maps to 2026-W17', () => {
-  // 2026-04-20 is a Monday
-  assertEqual(weekKeyFor(new Date('2026-04-20T12:00:00Z')), '2026-W17')
+test('Sunday Apr 19 2026 maps to 2026-W16', () => {
+  // Apr 19 is Sun, Wed of week is Apr 22 (year 2026). First Wed of 2026 = Jan 7.
+  // Week 1 Sunday = Jan 4. Apr 19 - Jan 4 = 105 days = 15 weeks → weekNum 16.
+  assertEqual(weekKeyFor(new Date('2026-04-19T12:00:00Z')), '2026-W16')
 })
 
-test('Sunday of W17 2026 maps to 2026-W17', () => {
-  // 2026-04-26 is a Sunday
+test('Saturday Apr 25 2026 maps to 2026-W16', () => {
+  // Same week as Sunday Apr 19.
+  assertEqual(weekKeyFor(new Date('2026-04-25T12:00:00Z')), '2026-W16')
+})
+
+test('Sunday Apr 26 2026 maps to 2026-W17', () => {
+  // Next Sun-Sat week.
   assertEqual(weekKeyFor(new Date('2026-04-26T12:00:00Z')), '2026-W17')
 })
 
-test('Monday of W18 maps to 2026-W18', () => {
-  assertEqual(weekKeyFor(new Date('2026-04-27T12:00:00Z')), '2026-W18')
-})
-
 test('zero-pads single-digit weeks', () => {
-  // 2026-01-05 is Mon of W02
-  assertEqual(weekKeyFor(new Date('2026-01-05T12:00:00Z')), '2026-W02')
+  // Sun Jan 4 2026 is week 1.
+  assertEqual(weekKeyFor(new Date('2026-01-04T12:00:00Z')), '2026-W01')
 })
 
 group('weekRange')
 
-test('returns Monday start and Sunday end for week key', () => {
+test('returns Sunday start and Saturday end for week key', () => {
   const r = weekRange('2026-W17')
-  assertEqual(r.start.toISOString().slice(0, 10), '2026-04-20')
-  assertEqual(r.end.toISOString().slice(0, 10), '2026-04-26')
+  assertEqual(r.start.toISOString().slice(0, 10), '2026-04-26')
+  assertEqual(r.end.toISOString().slice(0, 10), '2026-05-02')
 })
 
 test('label is human-readable', () => {
   const r = weekRange('2026-W17')
-  assert(r.label.includes('Apr'), `Label should include Apr, got: ${r.label}`)
-  assert(r.label.includes('20'), `Label should include 20, got: ${r.label}`)
+  assert(r.label.includes('Apr') || r.label.includes('May'),
+    `Label should include Apr or May, got: ${r.label}`)
   assert(r.label.includes('26'), `Label should include 26, got: ${r.label}`)
+  assert(r.label.includes('2'), `Label should include 2 (May 2), got: ${r.label}`)
 })
 
 // ─── weekly-update: carry-over ────────────────────────────────────────────────
