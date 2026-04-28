@@ -649,6 +649,44 @@ test('returns a color from the palette', () => {
   assert(ASSIGNEE_COLORS.includes(color), `${color} should be in ASSIGNEE_COLORS`)
 })
 
+// ─── weekly-update: week math ─────────────────────────────────────────────────
+
+group('weekKeyFor')
+
+test('Monday of W17 2026 maps to 2026-W17', () => {
+  // 2026-04-20 is a Monday
+  assertEqual(weekKeyFor(new Date('2026-04-20T12:00:00Z')), '2026-W17')
+})
+
+test('Sunday of W17 2026 maps to 2026-W17', () => {
+  // 2026-04-26 is a Sunday
+  assertEqual(weekKeyFor(new Date('2026-04-26T12:00:00Z')), '2026-W17')
+})
+
+test('Monday of W18 maps to 2026-W18', () => {
+  assertEqual(weekKeyFor(new Date('2026-04-27T12:00:00Z')), '2026-W18')
+})
+
+test('zero-pads single-digit weeks', () => {
+  // 2026-01-05 is Mon of W02
+  assertEqual(weekKeyFor(new Date('2026-01-05T12:00:00Z')), '2026-W02')
+})
+
+group('weekRange')
+
+test('returns Monday start and Sunday end for week key', () => {
+  const r = weekRange('2026-W17')
+  assertEqual(r.start.toISOString().slice(0, 10), '2026-04-20')
+  assertEqual(r.end.toISOString().slice(0, 10), '2026-04-26')
+})
+
+test('label is human-readable', () => {
+  const r = weekRange('2026-W17')
+  assert(r.label.includes('Apr'), `Label should include Apr, got: ${r.label}`)
+  assert(r.label.includes('20'), `Label should include 20, got: ${r.label}`)
+  assert(r.label.includes('26'), `Label should include 26, got: ${r.label}`)
+})
+
 // ─── Render Results ───────────────────────────────────────────────────────────
 
 ;(() => {

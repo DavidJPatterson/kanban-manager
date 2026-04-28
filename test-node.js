@@ -56,6 +56,7 @@ function loadFile(name) {
 
 // Load shared.js (defines all functions as globals in context)
 loadFile('shared.js')
+loadFile('weekly-update.js')
 
 // Load test.js (runs all tests, reports via console)
 loadFile('test.js')
