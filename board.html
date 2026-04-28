@@ -423,6 +423,17 @@
   [data-theme="light"] .exec-risk-item.critical { color: #b91c1c; }
   .exec-risk-icon { flex-shrink: 0; }
 
+  .exec-suggestions { background: var(--card-bg); padding: 8px 12px; border-radius: 6px; margin: 8px 0; font-size: .85rem; }
+  .exec-suggestions summary { cursor: pointer; font-weight: 600; }
+  .exec-sugg-cols { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; margin-top: 8px; }
+  .exec-sugg-label { font-weight: 600; margin-bottom: 4px; }
+  .exec-sugg-cols ul { list-style: none; padding: 0; margin: 0; }
+  .exec-sugg { padding: 4px 0; }
+  .exec-sugg.promoted { opacity: .5; }
+  .exec-sugg-added { color: #059669; font-weight: 600; }
+  .exec-sugg-promote, .exec-sugg-dismiss { font-size: .7rem; margin-left: 4px; }
+  .exec-sugg-empty { color: var(--muted); font-style: italic; }
+
   .exec-breakdown { display: flex; gap: 1rem; flex-wrap: wrap; margin: .5rem 0; }
   .exec-breakdown-group { display: flex; align-items: center; gap: .35rem; flex-wrap: wrap; }
   .exec-breakdown-label { font-size: .625rem; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); font-weight: 600; margin-right: .15rem; }

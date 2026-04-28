@@ -1263,6 +1263,39 @@ async function buildExecutiveSummaryPanel(cachedData, settings, sortedPods) {
   </div>
 `
 
+    const showSuggestions = selectedWeekKey === getCurrentWeekKey() || selectedWeekKey === getLastCompletedWeekKey()
+    let suggHtml = ''
+    if (showSuggestions && !pe.steady && !readonly) {
+      const sugg = buildSuggestions(pod, cachedData, settings, holidays)
+      const promotedKeys = new Set(pe.suggestionsState?.promoted || [])
+      const dismissedKeys = new Set(pe.suggestionsState?.dismissed || [])
+      function renderSuggList(category, items) {
+        if (items.length === 0) return '<li class="exec-sugg-empty">—</li>'
+        return items.map(s => {
+          const promoted = promotedKeys.has(s.key)
+          const dismissed = dismissedKeys.has(s.key)
+          if (dismissed) return ''
+          const icon = s.type === 'positive' ? '✅' : s.type === 'blocker' ? '🔴' : s.type === 'warning' ? '⚠️' : 'ℹ️'
+          const action = promoted
+            ? '<span class="exec-sugg-added">✓ Added</span>'
+            : `<button class="exec-sugg-promote" data-key="${escAttr(s.key)}" data-pod="${escAttr(pod.id)}" data-cat="${category}" data-text="${escAttr(s.text)}">→ Add to ${category}</button>
+               <button class="exec-sugg-dismiss" data-key="${escAttr(s.key)}" data-pod="${escAttr(pod.id)}">Dismiss</button>`
+          return `<li class="exec-sugg ${promoted ? 'promoted' : ''}">${icon} ${escHtml(s.text)} ${action}</li>`
+        }).join('')
+      }
+      suggHtml = `
+        <details class="exec-suggestions">
+          <summary>Auto-suggestions for ${escHtml(pod.name)} (${sugg.wins.length} wins · ${sugg.issues.length} issues · ${sugg.actions.length} actions)</summary>
+          <div class="exec-sugg-cols">
+            <div><div class="exec-sugg-label">Wins</div><ul>${renderSuggList('progress', sugg.wins)}</ul></div>
+            <div><div class="exec-sugg-label">Issues</div><ul>${renderSuggList('issues', sugg.issues)}</ul></div>
+            <div><div class="exec-sugg-label">Actions</div><ul>${renderSuggList('actions', sugg.actions)}</ul></div>
+          </div>
+        </details>
+      `
+    }
+    html += suggHtml
+
     // Per-pod insights (health traffic light stays as the dot, text alerts come from insights only)
     if (pInsights.length) {
       html += '<div class="exec-risks">'
@@ -1494,6 +1527,39 @@ async function buildExecutiveSummaryPanel(cachedData, settings, sortedPods) {
     cb.addEventListener('change', async () => {
       const podId = cb.closest('.exec-pod-update').dataset.pod
       wu.pods[podId].steady = cb.checked
+      await persistWu()
+      buildExecutiveSummaryPanel(cachedData, settings, sortedPods)
+    })
+  })
+
+  panel.querySelectorAll('.exec-sugg-promote').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const podId = btn.dataset.pod
+      const cat = btn.dataset.cat
+      const key = btn.dataset.key
+      const text = btn.dataset.text
+      const newEntry = { id: crypto.randomUUID(), text, workItemIds: [] }
+      if (cat === 'issues') Object.assign(newEntry, { severity: 'risk', owner: null, needsFromLeadership: false })
+      if (cat === 'actions') {
+        Object.assign(newEntry, { owner: null, due: 'this-week', carriedFrom: null })
+        const prevKey = previousIsoWeekKey(selectedWeekKey)
+        const prevWu = await getWeeklyUpdate(prevKey)
+        detectCarryOver([newEntry], (prevWu.pods?.[podId]?.actions) || [], prevKey)
+      }
+      wu.pods[podId][cat].push(newEntry)
+      if (!wu.pods[podId].suggestionsState) wu.pods[podId].suggestionsState = { promoted: [], dismissed: [] }
+      wu.pods[podId].suggestionsState.promoted.push(key)
+      await persistWu()
+      buildExecutiveSummaryPanel(cachedData, settings, sortedPods)
+    })
+  })
+
+  panel.querySelectorAll('.exec-sugg-dismiss').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const podId = btn.dataset.pod
+      const key = btn.dataset.key
+      if (!wu.pods[podId].suggestionsState) wu.pods[podId].suggestionsState = { promoted: [], dismissed: [] }
+      wu.pods[podId].suggestionsState.dismissed.push(key)
       await persistWu()
       buildExecutiveSummaryPanel(cachedData, settings, sortedPods)
     })
