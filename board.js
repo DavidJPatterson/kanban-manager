@@ -956,11 +956,33 @@ async function buildExecutiveSummaryPanel(cachedData, settings, sortedPods) {
   // ── Build HTML ──
   let html = ''
 
-  // Header
+  // Week selector toolbar + header
+  const allWeeks = await listWeeks()
+  const selectedWeekKey = panel.dataset.selectedWeek || getLastCompletedWeekKey()
+  panel.dataset.selectedWeek = selectedWeekKey
+  const wu = await getWeeklyUpdate(selectedWeekKey)
+  const range = weekRange(selectedWeekKey)
+  const isFinalised = !!wu.finalisedAt
+  const finalisedDateLabel = isFinalised ? new Date(wu.finalisedAt).toLocaleDateString('en-GB') : ''
+
   html += `
+    <div class="exec-toolbar">
+      <button class="exec-week-prev" title="Previous week">◀</button>
+      <select class="exec-week-select">
+        ${allWeeks.map(w => `<option value="${escAttr(w)}" ${w === selectedWeekKey ? 'selected' : ''}>Week of ${escHtml(weekRange(w).label)} (${escHtml(w)})</option>`).join('')}
+      </select>
+      <button class="exec-week-next" title="Next week">▶</button>
+      <span class="exec-status-badge ${isFinalised ? 'finalised' : 'draft'}">
+        ${isFinalised ? `✓ Finalised ${escHtml(finalisedDateLabel)}` : '● Draft'}
+      </span>
+      <span class="exec-saved-indicator"></span>
+      ${isFinalised
+        ? `<button class="exec-reexport-btn">Re-export PDF</button><button class="exec-unlock-btn">Unlock</button>`
+        : `<button class="exec-finalise-btn">Finalise &amp; Export PDF</button>`}
+    </div>
     <div class="exec-header">
       <div class="exec-title">Executive Summary</div>
-      <div class="exec-date">${escHtml(weekLabel)}</div>
+      <div class="exec-date">${escHtml(range.label)}</div>
     </div>
   `
 
@@ -1273,6 +1295,22 @@ async function buildExecutiveSummaryPanel(cachedData, settings, sortedPods) {
       current[podId] = textarea.value
       await setExecSummaryNotes(current)
     })
+  })
+
+  // Week selector
+  panel.querySelector('.exec-week-select')?.addEventListener('change', (e) => {
+    panel.dataset.selectedWeek = e.target.value
+    buildExecutiveSummaryPanel(cachedData, settings, sortedPods)
+  })
+  panel.querySelector('.exec-week-prev')?.addEventListener('click', () => {
+    const sel = panel.querySelector('.exec-week-select')
+    const idx = sel.selectedIndex
+    if (idx < sel.options.length - 1) { sel.selectedIndex = idx + 1; sel.dispatchEvent(new Event('change')) }
+  })
+  panel.querySelector('.exec-week-next')?.addEventListener('click', () => {
+    const sel = panel.querySelector('.exec-week-select')
+    const idx = sel.selectedIndex
+    if (idx > 0) { sel.selectedIndex = idx - 1; sel.dispatchEvent(new Event('change')) }
   })
 }
 
