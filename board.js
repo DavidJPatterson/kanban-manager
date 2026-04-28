@@ -1283,6 +1283,19 @@ async function buildExecutiveSummaryPanel(cachedData, settings, sortedPods) {
     if (!wu.pods[pod.id]) wu.pods[pod.id] = emptyPodShape()
     const pe = wu.pods[pod.id]
 
+    // Auto-Steady: if pod is paused for the entire selected week, tick steady once
+    const pause = holidays[pod.id]?._podPaused
+    if (pause?.paused && !pe._autoSteadyApplied) {
+      const weekR = weekRange(selectedWeekKey)
+      const resume = pause.resumeDate ? new Date(pause.resumeDate) : null
+      // Auto-Steady only if paused covers the whole week (no resume during the week)
+      if (!resume || resume > weekR.end) {
+        pe.steady = true
+        pe._autoSteadyApplied = true
+        await persistWu()
+      }
+    }
+
     const stickyDis = readonly ? 'disabled' : ''
 
     html += `
