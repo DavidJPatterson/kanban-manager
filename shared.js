@@ -715,7 +715,7 @@ function calcFlowEfficiency(ctData) {
   };
 }
 
-// ─── Stale Items: active items with no state change in X days ────────────────
+// ─── Stale Items: in-scope items with no state change in X days ────────────────
 
 function isBlocked(item) {
   const col = (item.boardColumn || '').toLowerCase()
@@ -760,6 +760,7 @@ function calcStaleItems(items, staleDays = 2) {
       url: item.url
     };
   }).sort((a, b) => {
+    // Blocked first, then by stalest
     if (a.blocked !== b.blocked) return a.blocked ? -1 : 1;
     return b.staleDaysActual - a.staleDaysActual;
   });
