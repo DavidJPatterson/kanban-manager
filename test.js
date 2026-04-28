@@ -216,14 +216,14 @@ test('identifies stale Active items by changedDate', () => {
   assert(result.items[0].staleDaysActual >= 4 && result.items[0].staleDaysActual <= 5, `Expected ~5 days, got ${result.items[0].staleDaysActual}`)
 })
 
-test('excludes non-Active states', () => {
+test('excludes terminal and intake states, includes in-scope states', () => {
   const items = [
-    makeItem({ changedDate: daysAgo(10), state: 'New' }),
-    makeItem({ changedDate: daysAgo(10), state: 'Ready' }),
-    makeItem({ changedDate: daysAgo(10), state: 'Active' })
+    makeItem({ changedDate: daysAgo(10), state: 'New' }),     // excluded (intake)
+    makeItem({ changedDate: daysAgo(10), state: 'Ready' }),   // included (in-scope)
+    makeItem({ changedDate: daysAgo(10), state: 'Active' })   // included (in-scope)
   ]
   const result = calcStaleItems(items, 2)
-  assertEqual(result.total, 1, 'Only Active items should be stale')
+  assertEqual(result.total, 2, 'New excluded; Ready and Active both stale')
 })
 
 test('returns zero for no stale items', () => {
@@ -277,6 +277,66 @@ test('sorts by stalest first', () => {
   const result = calcStaleItems(items, 2)
   assert(result.items[0].staleDaysActual >= result.items[1].staleDaysActual, 'Should be sorted stalest first')
   assert(result.items[1].staleDaysActual >= result.items[2].staleDaysActual, 'Should be sorted stalest first')
+})
+
+// ─── calcStaleItems widening ──────────────────────────────────────────────────
+
+group('calcStaleItems — widened state set')
+
+test('includes Resolved items past threshold', () => {
+  const items = [
+    makeItem({ id: 1, state: 'Resolved', changedDate: daysAgo(5) }),
+    makeItem({ id: 2, state: 'Active',   changedDate: daysAgo(5) })
+  ]
+  const r = calcStaleItems(items, 2)
+  assertEqual(r.total, 2, 'Resolved + Active both stale')
+  assert(r.items.some(i => i.id === 1), 'Resolved item present')
+})
+
+test('includes QA Complete items past threshold', () => {
+  const items = [makeItem({ id: 1, state: 'QA Complete', changedDate: daysAgo(10) })]
+  const r = calcStaleItems(items, 2)
+  assertEqual(r.total, 1)
+})
+
+test('excludes Closed items', () => {
+  const items = [makeItem({ id: 1, state: 'Closed', changedDate: daysAgo(20) })]
+  const r = calcStaleItems(items, 2)
+  assertEqual(r.total, 0)
+})
+
+test('excludes Removed items', () => {
+  const items = [makeItem({ id: 1, state: 'Removed', changedDate: daysAgo(20) })]
+  const r = calcStaleItems(items, 2)
+  assertEqual(r.total, 0)
+})
+
+test('excludes Triage items even when very old', () => {
+  const items = [makeItem({ id: 1, state: 'Triage', changedDate: daysAgo(20) })]
+  const r = calcStaleItems(items, 2)
+  assertEqual(r.total, 0)
+})
+
+test('excludes New items even when very old', () => {
+  const items = [makeItem({ id: 1, state: 'New', changedDate: daysAgo(20) })]
+  const r = calcStaleItems(items, 2)
+  assertEqual(r.total, 0)
+})
+
+test('returned items expose currentState', () => {
+  const items = [makeItem({ id: 1, state: 'Resolved', changedDate: daysAgo(5) })]
+  const r = calcStaleItems(items, 2)
+  assertEqual(r.items[0].currentState, 'Resolved')
+})
+
+test('blocked items in Resolved state included', () => {
+  const items = [makeItem({
+    id: 1, state: 'Resolved', boardColumn: 'Blocked',
+    changedDate: daysAgo(0)  // not stale by age, but blocked
+  })]
+  const r = calcStaleItems(items, 2)
+  assertEqual(r.total, 1)
+  assertEqual(r.blocked, 1)
 })
 
 // ─── calcBugRatioTrend ────────────────────────────────────────────────────────
