@@ -4,6 +4,23 @@ All notable changes to Kanban Manager are documented here.
 
 ---
 
+## [Unreleased]
+
+### Added
+
+- **Weekly pod status update** on the Executive Summary tab — structured Progress / Issues / Actions per pod, Unit-level Highlights (Top 3 Wins / Issues / Actions), ISO-week-keyed history with a week selector (◀ / dropdown / ▶), auto-suggestions drawn from cached data with promote / dismiss state, automatic carry-over detection on actions that repeat week-to-week, Steady checkbox per pod (auto-ticked when a pod is paused for the entire week), Finalise / Unlock / Re-export flow with read-only state on finalised weeks, and a "Steady this week" roll-up footer.
+- **Team Leads management** on the Options page — multi-pod assignment, surfaced in the owner picker on Issues and Actions with a 👑 badge.
+- **Unit Name** setting on the Options page — required for PDF export, used in the PDF header and document title.
+- **PDF export of the weekly status** as an A4 portrait artifact via native browser print. Page 1 is the executive cut (Highlights, Key Issues, Actions Next Week, At a Glance KPIs across Arrival / Throughput / Cycle Time / Active WIP / Stale-Blocked, and an Actions-by-team-lead roll-up). Page 2 onward is per-pod detail for non-Steady pods. Final-page footer lists Steady pods. Coloured header band, severity badges, page numbers.
+- **Sunday – Saturday weeks** for the new weekly-update lifecycle. Operational metrics (charts, KPI cards, WoW tables) retain the existing Monday – Sunday boundaries.
+
+### Changed
+
+- **BREAKING: `calcStaleItems` widened** to include items in any non-terminal, non-intake state (Resolved, QA Complete, Ready for Release, In Review, In Progress). Was: `Active` only. Items stuck in those states past the staleDays threshold now count toward the popup, exec-summary KPIs, pod health badges, and the stale-items table on the Overview tab. Existing dashboards may show higher counts on next refresh — these items were always there; the calculation now surfaces them.
+- **Stale-items table** now displays the item's current state alongside its column.
+
+---
+
 ## [1.3.2] — 2026-04-27
 
 ### Added

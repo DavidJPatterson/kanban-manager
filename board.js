@@ -38,6 +38,10 @@ function escHtml(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
+function escAttr(s) {
+  return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
+}
+
 function fmtDate(isoStr) {
   if (!isoStr) return '';
   const d = new Date(isoStr);
@@ -956,11 +960,140 @@ async function buildExecutiveSummaryPanel(cachedData, settings, sortedPods) {
   // ── Build HTML ──
   let html = ''
 
-  // Header
+  // Week selector toolbar + header
+  const allWeeks = await listWeeks()
+  const selectedWeekKey = panel.dataset.selectedWeek || getLastCompletedWeekKey()
+  panel.dataset.selectedWeek = selectedWeekKey
+  const wu = await getWeeklyUpdate(selectedWeekKey)
+  const range = weekRange(selectedWeekKey)
+  const isFinalised = !!wu.finalisedAt
+  const finalisedDateLabel = isFinalised ? new Date(wu.finalisedAt).toLocaleDateString('en-GB') : ''
+
   html += `
+    <div class="exec-toolbar">
+      <button class="exec-week-prev" title="Previous week">◀</button>
+      <select class="exec-week-select">
+        ${allWeeks.map(w => `<option value="${escAttr(w)}" ${w === selectedWeekKey ? 'selected' : ''}>Week of ${escHtml(weekRange(w).label)} (${escHtml(w)})</option>`).join('')}
+      </select>
+      <button class="exec-week-next" title="Next week">▶</button>
+      <span class="exec-status-badge ${isFinalised ? 'finalised' : 'draft'}">
+        ${isFinalised ? `✓ Finalised ${escHtml(finalisedDateLabel)}` : '● Draft'}
+      </span>
+      <span class="exec-saved-indicator"></span>
+      ${isFinalised
+        ? `<button class="exec-reexport-btn">Re-export PDF</button><button class="exec-unlock-btn">Unlock</button>`
+        : `<button class="exec-finalise-btn">Finalise &amp; Export PDF</button>`}
+    </div>
     <div class="exec-header">
       <div class="exec-title">Executive Summary</div>
-      <div class="exec-date">${escHtml(weekLabel)}</div>
+      <div class="exec-date">${escHtml(range.label)}</div>
+    </div>
+  `
+
+  const readonly = isFinalised && panel.dataset.unlocked !== '1'
+  const headline = wu.unitHeadline || { wins: [], issues: [], actions: [] }
+
+  function renderOwnerPicker(pod, currentOwner, ro) {
+    if (ro) {
+      return currentOwner
+        ? `<span class="exec-owner">${currentOwner.kind === 'lead' ? '👑 ' : ''}${escHtml(currentOwner.name)}</span>`
+        : '<span class="exec-owner exec-owner-empty">no owner</span>'
+    }
+    const teamLeads = settings.teamLeads || []
+    const currentValue = currentOwner ? `${currentOwner.kind}:${currentOwner.id || ''}:${currentOwner.name}` : ''
+    function opt(value, label, selected) {
+      return `<option value="${escAttr(value)}" ${selected ? 'selected' : ''}>${escHtml(label)}</option>`
+    }
+    // Unit-level: single group of all team leads
+    if (!pod) {
+      return `
+        <select class="exec-owner-picker">
+          <option value="">— select owner —</option>
+          ${teamLeads.length ? `<optgroup label="Team Leads">${teamLeads.map(l => opt(`lead:${l.id}:${l.name}`, `👑 ${l.name}`, currentValue === `lead:${l.id}:${l.name}`)).join('')}</optgroup>` : ''}
+          <option value="__custom__">+ Add custom...</option>
+        </select>
+      `
+    }
+    // Pod-level: grouped by this-pod / pod-members / other-pods (existing behaviour)
+    const podLeads = teamLeads.filter(l => (l.podIds || []).includes(pod.id))
+    const otherLeads = teamLeads.filter(l => !(l.podIds || []).includes(pod.id))
+    const assignees = [...new Set((pod.items || []).filter(i => i.assignee).map(i => i.assignee))]
+    return `
+      <select class="exec-owner-picker">
+        <option value="">— select owner —</option>
+        ${podLeads.length ? `<optgroup label="Team Leads (this pod)">${podLeads.map(l => opt(`lead:${l.id}:${l.name}`, `👑 ${l.name}`, currentValue === `lead:${l.id}:${l.name}`)).join('')}</optgroup>` : ''}
+        ${assignees.length ? `<optgroup label="Pod members">${assignees.map(a => opt(`member::${a}`, a, currentValue === `member::${a}`)).join('')}</optgroup>` : ''}
+        ${otherLeads.length ? `<optgroup label="Other team leads">${otherLeads.map(l => opt(`lead:${l.id}:${l.name}`, `👑 ${l.name}`, currentValue === `lead:${l.id}:${l.name}`)).join('')}</optgroup>` : ''}
+        <option value="__custom__">+ Add custom...</option>
+      </select>
+    `
+  }
+
+  function renderEntryList(category, entries, podScope = null) {
+    const pod = podScope ? (settings.pods || []).find(p => p.id === podScope) : null
+    return entries.map(e => {
+      const sev = (category === 'issues')
+        ? (readonly
+            ? `<span class="exec-sev sev-${e.severity || 'risk'}">${e.severity || 'risk'}</span>`
+            : `<select class="exec-sev-picker" data-entry-id="${escAttr(e.id)}" data-pod="${escAttr(podScope || '_unit')}">
+                <option value="blocker" ${e.severity === 'blocker' ? 'selected' : ''}>blocker</option>
+                <option value="risk"    ${e.severity === 'risk' || !e.severity ? 'selected' : ''}>risk</option>
+                <option value="watch"   ${e.severity === 'watch' ? 'selected' : ''}>watch</option>
+              </select>`)
+        : ''
+      const ownerHtml = (category === 'issues' || category === 'actions')
+        ? renderOwnerPicker(pod, e.owner, readonly)
+        : ''
+      const dueHtml = (category === 'actions')
+        ? (readonly
+            ? `<span class="exec-due">${escHtml(e.due || 'this-week')}</span>`
+            : `<select class="exec-due-picker" data-entry-id="${escAttr(e.id)}" data-pod="${escAttr(podScope || '_unit')}">
+                <option value="this-week" ${e.due === 'this-week' ? 'selected' : ''}>this week</option>
+                <option value="next-week" ${e.due === 'next-week' ? 'selected' : ''}>next week</option>
+              </select>`)
+        : ''
+      const carried = e.carriedFrom ? `<span class="exec-carried">↻ carried from ${escHtml(e.carriedFrom)}</span>` : ''
+      const needs = (category === 'issues' && !readonly)
+        ? `<label class="exec-needs-label"><input type="checkbox" class="exec-needs-cb" data-entry-id="${escAttr(e.id)}" data-pod="${escAttr(podScope || '_unit')}" ${e.needsFromLeadership ? 'checked' : ''}/> Needs leadership</label>`
+        : (e.needsFromLeadership ? `<span class="exec-needs">NEEDS LEADERSHIP</span>` : '')
+      const sourceChip = e.sourcePodId ? `<span class="exec-source">from ${escHtml(podNameById(e.sourcePodId))}</span>` : ''
+      const promoteBtn = (podScope && !readonly && (category === 'progress' || category === 'issues' || category === 'actions'))
+        ? `<button class="exec-promote-btn" data-entry-id="${escAttr(e.id)}" data-pod="${escAttr(podScope)}" data-category="${category}" title="Promote to Unit Headline">↑</button>`
+        : ''
+      const del = readonly ? '' : `<button class="exec-entry-del" data-entry-id="${escAttr(e.id)}" data-category="${category}" data-pod="${podScope || '_unit'}">×</button>`
+      return `<li class="exec-entry" data-entry-id="${escAttr(e.id)}">
+        ${sev}<span class="exec-entry-text" contenteditable="${!readonly}">${escHtml(e.text)}</span>
+        ${ownerHtml}${dueHtml}${carried}${needs}${sourceChip}${promoteBtn}${del}
+      </li>`
+    }).join('')
+  }
+
+  function podNameById(id) {
+    const p = (settings.pods || []).find(p => p.id === id)
+    return p ? p.name : id
+  }
+
+  const addBtn = (category) => readonly ? '' :
+    `<button class="exec-headline-add" data-category="${category}">+ add ${category}</button>`
+
+  html += `
+    <div class="exec-unit-headline">
+      <h3>Unit Headline</h3>
+      <div class="exec-headline-block">
+        <div class="exec-headline-label">Wins</div>
+        <ul class="exec-entries">${renderEntryList('wins', headline.wins)}</ul>
+        ${addBtn('wins')}
+      </div>
+      <div class="exec-headline-block">
+        <div class="exec-headline-label">Issues</div>
+        <ul class="exec-entries">${renderEntryList('issues', headline.issues)}</ul>
+        ${addBtn('issues')}
+      </div>
+      <div class="exec-headline-block">
+        <div class="exec-headline-label">Actions for next week</div>
+        <ul class="exec-entries">${renderEntryList('actions', headline.actions)}</ul>
+        ${addBtn('actions')}
+      </div>
     </div>
   `
 
@@ -1161,6 +1294,84 @@ async function buildExecutiveSummaryPanel(cachedData, settings, sortedPods) {
         <div class="exec-pod-body${isPaused ? ' collapsed' : ''}" data-exec-body="${escHtml(pod.id)}">
     `
 
+    // Lazy-init pod entry shape for this week
+    if (!wu.pods[pod.id]) wu.pods[pod.id] = emptyPodShape()
+    const pe = wu.pods[pod.id]
+
+    // Auto-Steady: if pod is paused for the entire selected week, tick steady once
+    const pause = holidays[pod.id]?._podPaused
+    if (pause?.paused && !pe._autoSteadyApplied) {
+      const weekR = weekRange(selectedWeekKey)
+      const resume = pause.resumeDate ? new Date(pause.resumeDate) : null
+      // Auto-Steady only if paused covers the whole week (no resume during the week)
+      if (!resume || resume > weekR.end) {
+        pe.steady = true
+        pe._autoSteadyApplied = true
+        await persistWu()
+      }
+    }
+
+    const stickyDis = readonly ? 'disabled' : ''
+
+    html += `
+  <div class="exec-pod-update" data-pod="${escAttr(pod.id)}">
+    <label class="exec-steady-label">
+      <input type="checkbox" class="exec-steady" ${stickyDis} ${pe.steady ? 'checked' : ''}/>
+      Mark steady this week
+    </label>
+    <div class="exec-pod-update-body" ${pe.steady ? 'style="opacity:.5"' : ''}>
+      <div class="exec-headline-block">
+        <div class="exec-headline-label">Progress</div>
+        <ul class="exec-entries">${renderEntryList('progress', pe.progress, pod.id)}</ul>
+        ${readonly ? '' : `<button class="exec-pod-add" data-category="progress" data-pod="${escAttr(pod.id)}">+ add</button>`}
+      </div>
+      <div class="exec-headline-block">
+        <div class="exec-headline-label">Issues</div>
+        <ul class="exec-entries">${renderEntryList('issues', pe.issues, pod.id)}</ul>
+        ${readonly ? '' : `<button class="exec-pod-add" data-category="issues" data-pod="${escAttr(pod.id)}">+ add</button>`}
+      </div>
+      <div class="exec-headline-block">
+        <div class="exec-headline-label">Actions</div>
+        <ul class="exec-entries">${renderEntryList('actions', pe.actions, pod.id)}</ul>
+        ${readonly ? '' : `<button class="exec-pod-add" data-category="actions" data-pod="${escAttr(pod.id)}">+ add</button>`}
+      </div>
+    </div>
+  </div>
+`
+
+    const showSuggestions = selectedWeekKey === getCurrentWeekKey() || selectedWeekKey === getLastCompletedWeekKey()
+    let suggHtml = ''
+    if (showSuggestions && !pe.steady && !readonly) {
+      const sugg = buildSuggestions(pod, cachedData, settings, holidays)
+      const promotedKeys = new Set(pe.suggestionsState?.promoted || [])
+      const dismissedKeys = new Set(pe.suggestionsState?.dismissed || [])
+      function renderSuggList(category, items) {
+        if (items.length === 0) return '<li class="exec-sugg-empty">—</li>'
+        return items.map(s => {
+          const promoted = promotedKeys.has(s.key)
+          const dismissed = dismissedKeys.has(s.key)
+          if (dismissed) return ''
+          const icon = s.type === 'positive' ? '✅' : s.type === 'blocker' ? '🔴' : s.type === 'warning' ? '⚠️' : 'ℹ️'
+          const action = promoted
+            ? '<span class="exec-sugg-added">✓ Added</span>'
+            : `<button class="exec-sugg-promote" data-key="${escAttr(s.key)}" data-pod="${escAttr(pod.id)}" data-cat="${category}" data-text="${escAttr(s.text)}">→ Add to ${category}</button>
+               <button class="exec-sugg-dismiss" data-key="${escAttr(s.key)}" data-pod="${escAttr(pod.id)}">Dismiss</button>`
+          return `<li class="exec-sugg ${promoted ? 'promoted' : ''}">${icon} ${escHtml(s.text)} ${action}</li>`
+        }).join('')
+      }
+      suggHtml = `
+        <details class="exec-suggestions">
+          <summary>Auto-suggestions for ${escHtml(pod.name)} (${sugg.wins.length} wins · ${sugg.issues.length} issues · ${sugg.actions.length} actions)</summary>
+          <div class="exec-sugg-cols">
+            <div><div class="exec-sugg-label">Wins</div><ul>${renderSuggList('progress', sugg.wins)}</ul></div>
+            <div><div class="exec-sugg-label">Issues</div><ul>${renderSuggList('issues', sugg.issues)}</ul></div>
+            <div><div class="exec-sugg-label">Actions</div><ul>${renderSuggList('actions', sugg.actions)}</ul></div>
+          </div>
+        </details>
+      `
+    }
+    html += suggHtml
+
     // Per-pod insights (health traffic light stays as the dot, text alerts come from insights only)
     if (pInsights.length) {
       html += '<div class="exec-risks">'
@@ -1249,6 +1460,11 @@ async function buildExecutiveSummaryPanel(cachedData, settings, sortedPods) {
     `
   }
 
+  const steadyPods = pods.filter(p => wu.pods?.[p.id]?.steady)
+  if (steadyPods.length > 0) {
+    html += `<div class="exec-steady-footer">💤 Steady this week: ${steadyPods.map(p => escHtml(p.name)).join(' · ')}</div>`
+  }
+
   html += '</div>'
   panel.innerHTML = html
 
@@ -1273,6 +1489,271 @@ async function buildExecutiveSummaryPanel(cachedData, settings, sortedPods) {
       current[podId] = textarea.value
       await setExecSummaryNotes(current)
     })
+  })
+
+  // Week selector
+  panel.querySelector('.exec-week-select')?.addEventListener('change', (e) => {
+    panel.dataset.selectedWeek = e.target.value
+    delete panel.dataset.unlocked   // reset unlock when navigating weeks
+    buildExecutiveSummaryPanel(cachedData, settings, sortedPods)
+  })
+  panel.querySelector('.exec-week-prev')?.addEventListener('click', () => {
+    const sel = panel.querySelector('.exec-week-select')
+    const idx = sel.selectedIndex
+    if (idx < sel.options.length - 1) { sel.selectedIndex = idx + 1; sel.dispatchEvent(new Event('change')) }
+  })
+  panel.querySelector('.exec-week-next')?.addEventListener('click', () => {
+    const sel = panel.querySelector('.exec-week-select')
+    const idx = sel.selectedIndex
+    if (idx > 0) { sel.selectedIndex = idx - 1; sel.dispatchEvent(new Event('change')) }
+  })
+
+  async function persistWu() {
+    await setWeeklyUpdate(selectedWeekKey, wu)
+    const ind = panel.querySelector('.exec-saved-indicator')
+    if (ind) {
+      ind.textContent = 'saved just now'
+      setTimeout(() => { if (ind) ind.textContent = '' }, 3000)
+    }
+  }
+
+  panel.querySelectorAll('.exec-headline-add').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const category = btn.dataset.category
+      const newEntry = { id: crypto.randomUUID(), text: '', workItemIds: [] }
+      if (category === 'issues') Object.assign(newEntry, { severity: 'risk', owner: null, needsFromLeadership: false })
+      if (category === 'actions') Object.assign(newEntry, { owner: null, due: 'this-week', carriedFrom: null })
+      wu.unitHeadline[category].push(newEntry)
+      await persistWu()
+      buildExecutiveSummaryPanel(cachedData, settings, sortedPods)
+    })
+  })
+
+  panel.querySelectorAll('.exec-entry-del').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const id = btn.dataset.entryId
+      const category = btn.dataset.category
+      const pod = btn.dataset.pod
+      const list = pod === '_unit' ? wu.unitHeadline[category] : wu.pods[pod]?.[category === 'wins' ? 'progress' : category]
+      if (!list) return
+      const idx = list.findIndex(e => e.id === id)
+      if (idx >= 0) list.splice(idx, 1)
+      await persistWu()
+      buildExecutiveSummaryPanel(cachedData, settings, sortedPods)
+    })
+  })
+
+  // Auto-save on text edits (contenteditable blur)
+  panel.querySelectorAll('.exec-entry-text').forEach(el => {
+    el.addEventListener('blur', async () => {
+      const li = el.closest('.exec-entry')
+      const id = li?.dataset.entryId
+      if (!id) return
+      // Search structure: { list, category, podId } so we know context after match
+      const searchSpaces = [
+        ...['wins', 'issues', 'actions'].map(c => ({ list: wu.unitHeadline[c], category: c, podId: null })),
+        ...Object.entries(wu.pods || {}).flatMap(([podId, p]) => [
+          { list: p.progress, category: 'progress', podId },
+          { list: p.issues,   category: 'issues',   podId },
+          { list: p.actions,  category: 'actions',  podId }
+        ])
+      ]
+      let matchedEntry = null
+      let matchedCategory = null
+      let matchedPodId = null
+      for (const space of searchSpaces) {
+        const e = space.list.find(x => x.id === id)
+        if (e) {
+          e.text = el.textContent.trim()
+          matchedEntry = e
+          matchedCategory = space.category
+          matchedPodId = space.podId
+          break
+        }
+      }
+      // Re-run carry-over detection for per-pod action entries with non-empty text
+      if (matchedEntry && matchedCategory === 'actions' && matchedPodId && matchedEntry.text) {
+        const prevKey = previousIsoWeekKey(selectedWeekKey)
+        const prevWu = await getWeeklyUpdate(prevKey)
+        const prevActions = (prevWu.pods?.[matchedPodId]?.actions) || []
+        // Reset carriedFrom before re-detecting — text may have changed away from the prior match
+        matchedEntry.carriedFrom = null
+        detectCarryOver([matchedEntry], prevActions, prevKey)
+      }
+      await persistWu()
+    })
+  })
+
+  panel.querySelectorAll('.exec-pod-add').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const podId = btn.dataset.pod
+      const category = btn.dataset.category
+      const list = wu.pods[podId][category]
+      const newEntry = { id: crypto.randomUUID(), text: '', workItemIds: [] }
+      if (category === 'issues') Object.assign(newEntry, { severity: 'risk', owner: null, needsFromLeadership: false })
+      if (category === 'actions') {
+        Object.assign(newEntry, { owner: null, due: 'this-week', carriedFrom: null })
+        // Carry-over detection on save
+        const prevKey = previousIsoWeekKey(selectedWeekKey)
+        const prevWu = await getWeeklyUpdate(prevKey)
+        const prevActions = (prevWu.pods?.[podId]?.actions) || []
+        detectCarryOver([newEntry], prevActions, prevKey)
+      }
+      list.push(newEntry)
+      await persistWu()
+      buildExecutiveSummaryPanel(cachedData, settings, sortedPods)
+    })
+  })
+
+  panel.querySelectorAll('.exec-steady').forEach(cb => {
+    cb.addEventListener('change', async () => {
+      const podId = cb.closest('.exec-pod-update').dataset.pod
+      wu.pods[podId].steady = cb.checked
+      await persistWu()
+      buildExecutiveSummaryPanel(cachedData, settings, sortedPods)
+    })
+  })
+
+  panel.querySelectorAll('.exec-sugg-promote').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const podId = btn.dataset.pod
+      const cat = btn.dataset.cat
+      const key = btn.dataset.key
+      const text = btn.dataset.text
+      const newEntry = { id: crypto.randomUUID(), text, workItemIds: [] }
+      if (cat === 'issues') Object.assign(newEntry, { severity: 'risk', owner: null, needsFromLeadership: false })
+      if (cat === 'actions') {
+        Object.assign(newEntry, { owner: null, due: 'this-week', carriedFrom: null })
+        const prevKey = previousIsoWeekKey(selectedWeekKey)
+        const prevWu = await getWeeklyUpdate(prevKey)
+        detectCarryOver([newEntry], (prevWu.pods?.[podId]?.actions) || [], prevKey)
+      }
+      wu.pods[podId][cat].push(newEntry)
+      if (!wu.pods[podId].suggestionsState) wu.pods[podId].suggestionsState = { promoted: [], dismissed: [] }
+      wu.pods[podId].suggestionsState.promoted.push(key)
+      await persistWu()
+      buildExecutiveSummaryPanel(cachedData, settings, sortedPods)
+    })
+  })
+
+  panel.querySelectorAll('.exec-sugg-dismiss').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const podId = btn.dataset.pod
+      const key = btn.dataset.key
+      if (!wu.pods[podId].suggestionsState) wu.pods[podId].suggestionsState = { promoted: [], dismissed: [] }
+      wu.pods[podId].suggestionsState.dismissed.push(key)
+      await persistWu()
+      buildExecutiveSummaryPanel(cachedData, settings, sortedPods)
+    })
+  })
+
+  function findEntry(podScope, entryId, category) {
+    const list = podScope === '_unit'
+      ? wu.unitHeadline[category === 'progress' ? 'wins' : category]
+      : wu.pods[podScope]?.[category]
+    return list?.find(e => e.id === entryId)
+  }
+
+  panel.querySelectorAll('.exec-owner-picker').forEach(sel => {
+    sel.addEventListener('change', async (e) => {
+      const li = sel.closest('.exec-entry')
+      const entryId = li.dataset.entryId
+      const podScope = li.closest('[data-pod]')?.dataset.pod || '_unit'
+      const block = li.closest('.exec-headline-block')
+      const labelText = block.querySelector('.exec-headline-label').textContent.trim().toLowerCase()
+      const category = labelText.startsWith('issue') ? 'issues' : labelText.startsWith('action') ? 'actions' : 'progress'
+      const entry = findEntry(podScope, entryId, category)
+      if (!entry) return
+      let val = sel.value
+      if (val === '__custom__') {
+        const name = prompt('Custom owner name:')
+        if (!name) { sel.value = ''; return }
+        entry.owner = { kind: 'custom', name: name.trim() }
+      } else if (val === '') {
+        entry.owner = null
+      } else {
+        const [kind, id, name] = val.split(':')
+        entry.owner = { kind, id: id || undefined, name }
+      }
+      await persistWu()
+      buildExecutiveSummaryPanel(cachedData, settings, sortedPods)
+    })
+  })
+
+  panel.querySelectorAll('.exec-sev-picker').forEach(sel => {
+    sel.addEventListener('change', async () => {
+      const entry = findEntry(sel.dataset.pod, sel.dataset.entryId, 'issues')
+      if (entry) { entry.severity = sel.value; await persistWu() }
+    })
+  })
+
+  panel.querySelectorAll('.exec-due-picker').forEach(sel => {
+    sel.addEventListener('change', async () => {
+      const entry = findEntry(sel.dataset.pod, sel.dataset.entryId, 'actions')
+      if (entry) { entry.due = sel.value; await persistWu() }
+    })
+  })
+
+  panel.querySelectorAll('.exec-needs-cb').forEach(cb => {
+    cb.addEventListener('change', async () => {
+      const entry = findEntry(cb.dataset.pod, cb.dataset.entryId, 'issues')
+      if (entry) { entry.needsFromLeadership = cb.checked; await persistWu() }
+    })
+  })
+
+  panel.querySelectorAll('.exec-promote-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const podId = btn.dataset.pod
+      const category = btn.dataset.category
+      const entryId = btn.dataset.entryId
+      const list = wu.pods[podId][category]
+      const src = list?.find(e => e.id === entryId)
+      if (!src) return
+      const headlineCategory = category === 'progress' ? 'wins' : category
+      const copy = JSON.parse(JSON.stringify(src))
+      copy.id = crypto.randomUUID()
+      copy.sourcePodId = podId
+      wu.unitHeadline[headlineCategory].push(copy)
+      await persistWu()
+      buildExecutiveSummaryPanel(cachedData, settings, sortedPods)
+    })
+  })
+
+  panel.querySelector('.exec-finalise-btn')?.addEventListener('click', async () => {
+    // Hard-block: unitName empty
+    if (!settings.unitName || !settings.unitName.trim()) {
+      alert('Unit Name is required for PDF export. Set it in Options first.')
+      return
+    }
+    // Soft warn: actions without owner
+    const allActions = [
+      ...wu.unitHeadline.actions,
+      ...Object.values(wu.pods).flatMap(p => p.actions || [])
+    ]
+    const ownerless = allActions.filter(a => !a.owner)
+    if (ownerless.length > 0) {
+      if (!confirm(`${ownerless.length} action${ownerless.length === 1 ? '' : 's'} have no owner — proceed anyway?`)) return
+    }
+    wu.finalisedAt = new Date().toISOString()
+    await persistWu()
+    // Open PDF export tab
+    const url = chrome.runtime.getURL('print-export.html') + '?week=' + encodeURIComponent(selectedWeekKey)
+    chrome.tabs.create({ url })
+    buildExecutiveSummaryPanel(cachedData, settings, sortedPods)
+  })
+
+  panel.querySelector('.exec-reexport-btn')?.addEventListener('click', () => {
+    const url = chrome.runtime.getURL('print-export.html') + '?week=' + encodeURIComponent(selectedWeekKey)
+    chrome.tabs.create({ url })
+  })
+
+  panel.querySelector('.exec-unlock-btn')?.addEventListener('click', async () => {
+    const finalisedDate = wu.finalisedAt ? new Date(wu.finalisedAt).toLocaleDateString('en-GB') : ''
+    if (!confirm(`This week was finalised on ${finalisedDate}. Edits will not be re-sent unless you re-export. Continue?`)) return
+    // We do NOT clear finalisedAt — leave the audit trail.
+    // Unlock is a per-render flag instead.
+    panel.dataset.unlocked = '1'
+    buildExecutiveSummaryPanel(cachedData, settings, sortedPods)
   })
 }
 

@@ -291,6 +291,12 @@
   footer { text-align: center; padding: .75rem; font-size: .75rem; color: var(--muted); border-top: 1px solid var(--border); }
 
   /* ── Executive Summary ── */
+  .exec-toolbar { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; flex-wrap: wrap; padding: 1rem 1.25rem 0; }
+  .exec-toolbar button { padding: 4px 10px; }
+  .exec-status-badge { padding: 2px 8px; border-radius: 4px; font-size: .8rem; }
+  .exec-status-badge.draft { background: #fef3c7; color: #92400e; }
+  .exec-status-badge.finalised { background: #d1fae5; color: #065f46; }
+  .exec-saved-indicator { font-size: .75rem; color: var(--muted); }
   .exec-header { padding: 1rem 1.25rem .5rem; }
   .exec-title { font-size: 1.25rem; font-weight: 700; }
   .exec-date { font-size: .75rem; color: var(--muted); margin-top: .15rem; }
@@ -340,6 +346,25 @@
   .exec-stale-link.type-bug { background: rgba(239,68,68,.15); color: #fca5a5; border: 1px solid rgba(239,68,68,.3); }
   .exec-stale-link.type-story { background: rgba(59,130,246,.15); color: #93c5fd; border: 1px solid rgba(59,130,246,.3); }
   .exec-stale-link:hover { opacity: .8; }
+
+  .exec-unit-headline { background: var(--card-bg); padding: 12px 16px; border-radius: 8px; margin-bottom: 16px; }
+  .exec-unit-headline h3 { margin: 0 0 8px 0; }
+  .exec-headline-block { margin-bottom: 12px; }
+  .exec-headline-label { font-weight: 600; font-size: .85rem; margin-bottom: 4px; }
+  .exec-entries { list-style: none; padding: 0; margin: 0; }
+  .exec-entry { padding: 4px 0; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .exec-entry-text { flex: 1; min-width: 200px; padding: 2px 4px; border-radius: 2px; }
+  .exec-entry-text:focus { outline: 1px solid var(--accent); background: var(--input-bg); }
+  .exec-sev { padding: 1px 6px; border-radius: 3px; font-size: .7rem; font-weight: 700; }
+  .exec-sev.sev-blocker { background: #dc2626; color: white; }
+  .exec-sev.sev-risk    { background: #d97706; color: white; }
+  .exec-sev.sev-watch   { background: #0891b2; color: white; }
+  .exec-needs { background: #fef3c7; color: #92400e; padding: 1px 6px; border-radius: 3px; font-size: .7rem; font-weight: 700; }
+  .exec-source { font-size: .7rem; color: var(--muted); }
+  .exec-carried { font-size: .7rem; color: #6366f1; }
+  .exec-headline-add { font-size: .8rem; padding: 2px 8px; }
+  .exec-entry-del { background: transparent; border: none; color: var(--muted); cursor: pointer; }
+  .exec-entry-del:hover { color: #dc2626; }
 
   .exec-pods { padding: 0 1.25rem; display: flex; flex-direction: column; gap: .75rem; padding-bottom: 1rem; }
   .exec-pod-card {
@@ -398,6 +423,17 @@
   [data-theme="light"] .exec-risk-item.critical { color: #b91c1c; }
   .exec-risk-icon { flex-shrink: 0; }
 
+  .exec-suggestions { background: var(--card-bg); padding: 8px 12px; border-radius: 6px; margin: 8px 0; font-size: .85rem; }
+  .exec-suggestions summary { cursor: pointer; font-weight: 600; }
+  .exec-sugg-cols { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; margin-top: 8px; }
+  .exec-sugg-label { font-weight: 600; margin-bottom: 4px; }
+  .exec-sugg-cols ul { list-style: none; padding: 0; margin: 0; }
+  .exec-sugg { padding: 4px 0; }
+  .exec-sugg.promoted { opacity: .5; }
+  .exec-sugg-added { color: #059669; font-weight: 600; }
+  .exec-sugg-promote, .exec-sugg-dismiss { font-size: .7rem; margin-left: 4px; }
+  .exec-sugg-empty { color: var(--muted); font-style: italic; }
+
   .exec-breakdown { display: flex; gap: 1rem; flex-wrap: wrap; margin: .5rem 0; }
   .exec-breakdown-group { display: flex; align-items: center; gap: .35rem; flex-wrap: wrap; }
   .exec-breakdown-label { font-size: .625rem; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); font-weight: 600; margin-right: .15rem; }
@@ -413,6 +449,15 @@
   }
   .exec-notes:focus { border-color: #3b82f6; outline: none; }
   .exec-notes::placeholder { color: var(--border); }
+
+  .exec-steady-footer {
+    margin: 16px 0;
+    padding: 8px 12px;
+    background: var(--card-bg);
+    border-radius: 4px;
+    font-size: .85rem;
+    color: var(--muted);
+  }
 
   .exec-predictability { display: flex; gap: .5rem; margin-bottom: .5rem; flex-wrap: wrap; }
   .exec-pred-badge {
@@ -515,6 +560,7 @@
 <footer>Data from Azure DevOps · Auto-refreshes every <span id="refresh-interval">15</span> min</footer>
 
 <script src="shared.js"></script>
+<script src="weekly-update.js"></script>
 <script src="board.js"></script>
 </body>
 </html>

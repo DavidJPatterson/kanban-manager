@@ -216,14 +216,14 @@ test('identifies stale Active items by changedDate', () => {
   assert(result.items[0].staleDaysActual >= 4 && result.items[0].staleDaysActual <= 5, `Expected ~5 days, got ${result.items[0].staleDaysActual}`)
 })
 
-test('excludes non-Active states', () => {
+test('excludes terminal and intake states, includes in-scope states', () => {
   const items = [
-    makeItem({ changedDate: daysAgo(10), state: 'New' }),
-    makeItem({ changedDate: daysAgo(10), state: 'Ready' }),
-    makeItem({ changedDate: daysAgo(10), state: 'Active' })
+    makeItem({ changedDate: daysAgo(10), state: 'New' }),     // excluded (intake)
+    makeItem({ changedDate: daysAgo(10), state: 'Ready' }),   // included (in-scope)
+    makeItem({ changedDate: daysAgo(10), state: 'Active' })   // included (in-scope)
   ]
   const result = calcStaleItems(items, 2)
-  assertEqual(result.total, 1, 'Only Active items should be stale')
+  assertEqual(result.total, 2, 'New excluded; Ready and Active both stale')
 })
 
 test('returns zero for no stale items', () => {
@@ -277,6 +277,86 @@ test('sorts by stalest first', () => {
   const result = calcStaleItems(items, 2)
   assert(result.items[0].staleDaysActual >= result.items[1].staleDaysActual, 'Should be sorted stalest first')
   assert(result.items[1].staleDaysActual >= result.items[2].staleDaysActual, 'Should be sorted stalest first')
+})
+
+// ─── calcStaleItems widening ──────────────────────────────────────────────────
+
+group('calcStaleItems — widened state set')
+
+test('includes Resolved items past threshold', () => {
+  const items = [
+    makeItem({ id: 1, state: 'Resolved', changedDate: daysAgo(5) }),
+    makeItem({ id: 2, state: 'Active',   changedDate: daysAgo(5) })
+  ]
+  const r = calcStaleItems(items, 2)
+  assertEqual(r.total, 2, 'Resolved + Active both stale')
+  assert(r.items.some(i => i.id === 1), 'Resolved item present')
+})
+
+test('includes QA Complete items past threshold', () => {
+  const items = [makeItem({ id: 1, state: 'QA Complete', changedDate: daysAgo(10) })]
+  const r = calcStaleItems(items, 2)
+  assertEqual(r.total, 1)
+})
+
+test('excludes Closed items', () => {
+  const items = [makeItem({ id: 1, state: 'Closed', changedDate: daysAgo(20) })]
+  const r = calcStaleItems(items, 2)
+  assertEqual(r.total, 0)
+})
+
+test('excludes Removed items', () => {
+  const items = [makeItem({ id: 1, state: 'Removed', changedDate: daysAgo(20) })]
+  const r = calcStaleItems(items, 2)
+  assertEqual(r.total, 0)
+})
+
+test('excludes Triage items even when very old', () => {
+  const items = [makeItem({ id: 1, state: 'Triage', changedDate: daysAgo(20) })]
+  const r = calcStaleItems(items, 2)
+  assertEqual(r.total, 0)
+})
+
+test('excludes New items even when very old', () => {
+  const items = [makeItem({ id: 1, state: 'New', changedDate: daysAgo(20) })]
+  const r = calcStaleItems(items, 2)
+  assertEqual(r.total, 0)
+})
+
+test('returned items expose currentState', () => {
+  const items = [makeItem({ id: 1, state: 'Resolved', changedDate: daysAgo(5) })]
+  const r = calcStaleItems(items, 2)
+  assertEqual(r.items[0].currentState, 'Resolved')
+})
+
+test('blocked items in Resolved state included', () => {
+  const items = [makeItem({
+    id: 1, state: 'Resolved', boardColumn: 'Blocked',
+    changedDate: daysAgo(0)  // not stale by age, but blocked
+  })]
+  const r = calcStaleItems(items, 2)
+  assertEqual(r.total, 1)
+  assertEqual(r.blocked, 1)
+})
+
+// ─── calcPodHealthStatus — widened stale ──────────────────────────────────────
+
+group('calcPodHealthStatus — widened stale')
+
+test('pod with Resolved-but-stuck items is at least amber', () => {
+  const pod = {
+    id: 'p1',
+    items: [
+      makeItem({ id: 1, state: 'Resolved', changedDate: daysAgo(10) }),
+      makeItem({ id: 2, state: 'Resolved', changedDate: daysAgo(10) }),
+      makeItem({ id: 3, state: 'Resolved', changedDate: daysAgo(10) })
+    ]
+  }
+  const h = calcPodHealthStatus(pod, 2)
+  assert(h.status === 'amber' || h.status === 'red',
+    `Expected amber or red, got ${h.status}`)
+  assert(h.reasons.some(r => r.toLowerCase().includes('stale')),
+    `Expected a stale-items reason, got: ${JSON.stringify(h.reasons)}`)
 })
 
 // ─── calcBugRatioTrend ────────────────────────────────────────────────────────
@@ -567,6 +647,171 @@ test('returns fallback for null', () => {
 test('returns a color from the palette', () => {
   const color = assigneeColor('TestPerson')
   assert(ASSIGNEE_COLORS.includes(color), `${color} should be in ASSIGNEE_COLORS`)
+})
+
+// ─── weekly-update: week math ─────────────────────────────────────────────────
+
+group('weekKeyFor')
+
+test('Sunday Apr 19 2026 maps to 2026-W16', () => {
+  // Apr 19 is Sun, Wed of week is Apr 22 (year 2026). First Wed of 2026 = Jan 7.
+  // Week 1 Sunday = Jan 4. Apr 19 - Jan 4 = 105 days = 15 weeks → weekNum 16.
+  assertEqual(weekKeyFor(new Date('2026-04-19T12:00:00Z')), '2026-W16')
+})
+
+test('Saturday Apr 25 2026 maps to 2026-W16', () => {
+  // Same week as Sunday Apr 19.
+  assertEqual(weekKeyFor(new Date('2026-04-25T12:00:00Z')), '2026-W16')
+})
+
+test('Sunday Apr 26 2026 maps to 2026-W17', () => {
+  // Next Sun-Sat week.
+  assertEqual(weekKeyFor(new Date('2026-04-26T12:00:00Z')), '2026-W17')
+})
+
+test('zero-pads single-digit weeks', () => {
+  // Sun Jan 4 2026 is week 1.
+  assertEqual(weekKeyFor(new Date('2026-01-04T12:00:00Z')), '2026-W01')
+})
+
+group('weekRange')
+
+test('returns Sunday start and Saturday end for week key', () => {
+  const r = weekRange('2026-W17')
+  assertEqual(r.start.toISOString().slice(0, 10), '2026-04-26')
+  assertEqual(r.end.toISOString().slice(0, 10), '2026-05-02')
+})
+
+test('label is human-readable', () => {
+  const r = weekRange('2026-W17')
+  assert(r.label.includes('Apr') || r.label.includes('May'),
+    `Label should include Apr or May, got: ${r.label}`)
+  assert(r.label.includes('26'), `Label should include 26, got: ${r.label}`)
+  assert(r.label.includes('2'), `Label should include 2 (May 2), got: ${r.label}`)
+})
+
+// ─── weekly-update: carry-over ────────────────────────────────────────────────
+
+group('detectCarryOver')
+
+test('matches identical action text case-insensitively', () => {
+  const prev = [{ id: 'p1', text: 'Triage QA backlog', owner: null, due: 'this-week' }]
+  const curr = [{ id: 'c1', text: 'TRIAGE QA BACKLOG', owner: null, due: 'this-week', carriedFrom: null }]
+  const r = detectCarryOver(curr, prev, '2026-W16')
+  assertEqual(r[0].carriedFrom, '2026-W16')
+})
+
+test('ignores whitespace differences', () => {
+  const prev = [{ id: 'p1', text: '  Triage QA backlog  ', owner: null, due: 'this-week' }]
+  const curr = [{ id: 'c1', text: 'Triage QA backlog', owner: null, due: 'this-week', carriedFrom: null }]
+  const r = detectCarryOver(curr, prev, '2026-W16')
+  assertEqual(r[0].carriedFrom, '2026-W16')
+})
+
+test('does not match when text differs', () => {
+  const prev = [{ id: 'p1', text: 'Triage QA backlog', owner: null, due: 'this-week' }]
+  const curr = [{ id: 'c1', text: 'Different action', owner: null, due: 'this-week', carriedFrom: null }]
+  const r = detectCarryOver(curr, prev, '2026-W16')
+  assertEqual(r[0].carriedFrom, null)
+})
+
+test('sets carriedFrom when prior action has its own chain', () => {
+  // Even when prev's action was already carried from W15, the current
+  // action's carriedFrom should reflect the *immediately prior* week (W16).
+  const prev = [{ id: 'p1', text: 'Triage QA backlog', carriedFrom: '2026-W15' }]
+  const curr = [{ id: 'c1', text: 'Triage QA backlog', carriedFrom: null }]
+  const r = detectCarryOver(curr, prev, '2026-W16')
+  assertEqual(r[0].carriedFrom, '2026-W16')
+})
+
+test('overwrites a stale carriedFrom on the current action', () => {
+  // detectCarryOver always sets carriedFrom to the immediately prior week
+  // when a match is found, regardless of any pre-existing value on the current action.
+  const prev = [{ id: 'p1', text: 'Triage QA backlog' }]
+  const curr = [{ id: 'c1', text: 'Triage QA backlog', carriedFrom: '2026-W12' }]
+  const r = detectCarryOver(curr, prev, '2026-W16')
+  assertEqual(r[0].carriedFrom, '2026-W16',
+    'Pre-existing stale carriedFrom should be overwritten with the immediate prior week')
+})
+
+group('carryChainLength')
+
+test('returns 0 for action not carried over', () => {
+  const action = { id: 'a1', text: 't', carriedFrom: null }
+  assertEqual(carryChainLength(action, {}, 'p1'), 0)
+})
+
+test('returns 1 for action carried from one prior week', () => {
+  const action = { id: 'a1', text: 'X', carriedFrom: '2026-W16' }
+  const allWeeks = {
+    '2026-W16': { pods: { p1: { actions: [{ id: 'a0', text: 'X', carriedFrom: null }] } } }
+  }
+  assertEqual(carryChainLength(action, allWeeks, 'p1'), 1)
+})
+
+test('returns 2 for two-week chain', () => {
+  const action = { id: 'a1', text: 'X', carriedFrom: '2026-W16' }
+  const allWeeks = {
+    '2026-W16': { pods: { p1: { actions: [{ id: 'a0', text: 'X', carriedFrom: '2026-W15' }] } } },
+    '2026-W15': { pods: { p1: { actions: [{ id: 'a-1', text: 'X', carriedFrom: null }] } } }
+  }
+  assertEqual(carryChainLength(action, allWeeks, 'p1'), 2)
+})
+
+test('does not chain across pods with identical action text', () => {
+  const action = { id: 'a1', text: 'Triage backlog', carriedFrom: '2026-W16' }
+  const allWeeks = {
+    '2026-W16': { pods: {
+      p2: { actions: [{ id: 'a0', text: 'Triage backlog', carriedFrom: null }] }
+      // note: p1 has no matching action
+    } }
+  }
+  assertEqual(carryChainLength(action, allWeeks, 'p1'), 0,
+    'Pod p1 chain should not pick up Pod p2 actions even with identical text')
+})
+
+// ─── weekly-update: suggestion engine ────────────────────────────────────────
+
+group('buildSuggestions — keys are deterministic')
+
+test('throughput-up suggestion has stable key', () => {
+  // Throughput pattern: 1 item closed each in older weeks 1-6, 4 items in last completed week.
+  // baseline = 6 / 4 = 1.5 (using last 4 of those 6), last = 4 → +166% triggers win.
+  const items = []
+  for (let i = 0; i < 4; i++) {
+    items.push(makeItem({ id: `last-${i}`, type: 'User Story', state: 'Closed', closed: daysAgo(8) }))
+  }
+  for (let i = 0; i < 4; i++) {
+    items.push(makeItem({ id: `bw-${i}`, type: 'User Story', state: 'Closed', closed: daysAgo(15 + i * 7) }))
+  }
+  const pod = { id: 'p1', name: 'Pod A', items }
+  const s1 = buildSuggestions(pod, {}, { staleDays: 2 }, {})
+  const s2 = buildSuggestions(pod, {}, { staleDays: 2 }, {})
+  const keys1 = s1.wins.concat(s1.issues, s1.actions).map(x => x.key).sort()
+  const keys2 = s2.wins.concat(s2.issues, s2.actions).map(x => x.key).sort()
+  assertEqual(JSON.stringify(keys1), JSON.stringify(keys2))
+  assert(s1.wins.some(w => w.key === 'win-throughput-up'),
+    `Expected win-throughput-up to fire on this fixture; got: ${JSON.stringify(s1.wins.map(w => w.key))}`)
+})
+
+test('suggested action for stale item uses item id in key', () => {
+  const pod = {
+    id: 'p1', name: 'Pod A',
+    items: [makeItem({ id: 4521, state: 'Active', changedDate: daysAgo(8) })]
+  }
+  const s = buildSuggestions(pod, {}, { staleDays: 2 }, {})
+  const triage = s.actions.find(a => a.key === 'action-triage-stale-4521')
+  assert(triage, 'Expected action with key action-triage-stale-4521')
+})
+
+test('suggested action for unassigned P1/P2 uses item id', () => {
+  const pod = {
+    id: 'p1', name: 'Pod A',
+    items: [makeItem({ id: 9999, state: 'Active', priority: 1, assignee: null })]
+  }
+  const s = buildSuggestions(pod, {}, { staleDays: 2 }, {})
+  const assn = s.actions.find(a => a.key === 'action-assign-owner-9999')
+  assert(assn, 'Expected assign-owner suggestion for unassigned P1 item')
 })
 
 // ─── Render Results ───────────────────────────────────────────────────────────

@@ -3,7 +3,7 @@
   "name": "Kanban Manager",
   "version": "1.3.2",
   "description": "Multi-pod Kanban dashboard with flow metrics, cycle time analytics, and health charts for Azure DevOps",
-  "permissions": ["storage", "alarms"],
+  "permissions": ["storage", "alarms", "tabs"],
   "host_permissions": ["https://dev.azure.com/*"],
   "icons": {
     "16": "icons/icon-16.png",
@@ -21,5 +21,11 @@
       "48": "icons/icon-48.png"
     }
   },
-  "options_page": "options.html"
+  "options_page": "options.html",
+  "web_accessible_resources": [
+    {
+      "resources": ["print-export.html", "print-export.js", "print-export.css", "shared.js", "weekly-update.js"],
+      "matches": ["<all_urls>"]
+    }
+  ]
 }

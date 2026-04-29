@@ -1,0 +1,252 @@
+/* print-export.css — A4 portrait leadership-report layout */
+
+@page {
+  size: A4 portrait;
+  margin: 16mm 16mm 18mm 16mm;
+  @bottom-right { content: counter(page) " / " counter(pages); font-size: 8pt; color: #666; }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  font-size: 10.5pt;
+  line-height: 1.45;
+  color: #1f2937;
+  margin: 0;
+  background: white;
+}
+
+#print-root { max-width: 100%; }
+.loading { color: #6b7280; font-style: italic; padding: 20px; }
+
+/* ── Header band ───────────────────────────────────────── */
+
+header {
+  background: linear-gradient(135deg, #1e3a8a 0%, #1e40af 100%);
+  color: white;
+  padding: 14px 18px;
+  margin: -2mm -2mm 18px -2mm;
+  border-radius: 4px;
+  page-break-after: avoid;
+}
+header h1 {
+  font-size: 17pt;
+  font-weight: 700;
+  margin: 0 0 4px 0;
+  letter-spacing: 0.2px;
+}
+header .meta {
+  font-size: 9pt;
+  color: #dbeafe;
+  margin-top: 2px;
+  font-weight: 400;
+}
+
+/* ── Section headings ──────────────────────────────────── */
+
+h2 {
+  font-size: 13pt;
+  font-weight: 700;
+  margin: 14px 0 6px 0;
+  padding: 4px 0 4px 10px;
+  border-left: 4px solid #2563eb;
+  color: #111827;
+  page-break-after: avoid;
+}
+
+h3 {
+  font-size: 11pt;
+  font-weight: 700;
+  margin: 8px 0 4px 0;
+  color: #1f2937;
+  page-break-after: avoid;
+}
+
+/* ── Lists ─────────────────────────────────────────────── */
+
+ul {
+  margin: 4px 0 10px 0;
+  padding: 0;
+  list-style: none;
+}
+li {
+  margin: 4px 0;
+  padding: 6px 10px;
+  background: #f9fafb;
+  border-radius: 3px;
+  border-left: 2px solid #e5e7eb;
+  page-break-inside: avoid;
+}
+li.muted {
+  color: #9ca3af;
+  font-style: italic;
+  background: transparent;
+  border-left: none;
+  padding-left: 0;
+}
+
+.highlights li { border-left-color: #10b981; }
+.key-issues li { border-left-color: #d97706; }
+.actions    li { border-left-color: #2563eb; }
+
+/* ── Severity, owner, metadata badges ──────────────────── */
+
+.sev {
+  display: inline-block;
+  font-size: 7.5pt;
+  padding: 1px 6px;
+  border-radius: 10px;
+  color: white;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  vertical-align: middle;
+  margin-right: 4px;
+}
+.sev-blocker { background: #dc2626; }
+.sev-risk    { background: #d97706; }
+.sev-watch   { background: #0891b2; }
+
+.needs {
+  display: inline-block;
+  background: #fef3c7;
+  color: #92400e;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 7.5pt;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  border: 1px solid #fde68a;
+  margin-left: 4px;
+}
+
+.owner { font-weight: 600; color: #1f2937; }
+.carried { color: #6366f1; font-size: 9pt; font-weight: 500; }
+.src { color: #6b7280; font-size: 9pt; font-style: italic; }
+
+/* ── At a Glance KPI strip ─────────────────────────────── */
+
+.at-a-glance {
+  display: flex;
+  gap: 8px;
+  margin: 8px 0 4px 0;
+  padding: 0;
+  background: transparent;
+  page-break-inside: avoid;
+}
+.at-a-glance .kpi {
+  flex: 1;
+  background: #f3f4f6;
+  border: 1px solid #e5e7eb;
+  border-radius: 4px;
+  padding: 8px 10px;
+  text-align: center;
+}
+.at-a-glance .kpi-label {
+  font-size: 8pt;
+  color: #6b7280;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+.at-a-glance .kpi-value {
+  font-size: 14pt;
+  font-weight: 700;
+  color: #111827;
+  line-height: 1.1;
+}
+.at-a-glance .kpi-delta {
+  font-size: 8.5pt;
+  color: #6b7280;
+  margin-top: 2px;
+}
+.at-a-glance .kpi-delta.up   { color: #059669; }
+.at-a-glance .kpi-delta.down { color: #dc2626; }
+
+/* ── Actions-by-lead roll-up ───────────────────────────── */
+
+.actions-by-lead {
+  font-size: 9.5pt;
+  margin: 10px 0;
+  padding: 6px 10px;
+  background: #f9fafb;
+  border-left: 3px solid #6366f1;
+  border-radius: 3px;
+  page-break-inside: avoid;
+}
+.actions-by-lead .label { font-weight: 600; color: #374151; margin-right: 6px; }
+.actions-by-lead .lead-tag {
+  display: inline-block;
+  margin-right: 4px;
+  padding: 1px 6px;
+  background: white;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  font-size: 9pt;
+}
+.actions-by-lead .lead-tag.unassigned {
+  background: #fef2f2;
+  border-color: #fecaca;
+  color: #b91c1c;
+  font-weight: 700;
+}
+
+/* ── Page break after page 1 ──────────────────────────── */
+
+.page-1 { page-break-after: always; }
+
+/* ── Pod detail ────────────────────────────────────────── */
+
+.pod-detail h2 { margin-top: 0; }
+
+.pod-card {
+  page-break-inside: avoid;
+  margin: 10px 0;
+  padding: 8px 12px;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-left: 4px solid #6366f1;
+  border-radius: 3px;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+}
+.pod-card h3 {
+  margin-top: 0;
+  border-bottom: 1px solid #f3f4f6;
+  padding-bottom: 4px;
+}
+.pod-card > div { margin: 4px 0; }
+.pod-card strong {
+  display: inline-block;
+  font-size: 9.5pt;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: #4b5563;
+  margin: 4px 0 2px 0;
+}
+.pod-card ul { margin-top: 2px; }
+
+/* ── Steady footer ─────────────────────────────────────── */
+
+.steady-footer {
+  margin-top: 18px;
+  padding: 8px 10px;
+  background: #f3f4f6;
+  border-radius: 3px;
+  font-size: 9pt;
+  color: #4b5563;
+  page-break-inside: avoid;
+}
+.steady-footer::before {
+  content: "💤 ";
+}
+
+@media print {
+  body { background: white; }
+  header { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .at-a-glance .kpi, .actions-by-lead, .steady-footer, li, .pod-card,
+  .sev, .needs, .actions-by-lead .lead-tag {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+}

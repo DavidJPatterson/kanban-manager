@@ -8,6 +8,8 @@ const DEFAULT_SETTINGS = {
   pat: '',
   pods: [],
   executiveSummary: false,
+  unitName: '',
+  teamLeads: [],
   overviewCharts: {
     cycleTimeInProgress: false,
     cycleTimeArrival: false,
@@ -37,6 +39,7 @@ const STORAGE_KEYS = {
   theme: 'theme',
   execSummaryNotes: 'execSummaryNotes',
   teamHolidays: 'teamHolidays',
+  weeklyUpdates: 'weeklyUpdates',
 }
 
 // ─── Storage helpers ───────────────────────────────────────────────────────────
@@ -715,7 +718,7 @@ function calcFlowEfficiency(ctData) {
   };
 }
 
-// ─── Stale Items: active items with no state change in X days ────────────────
+// ─── Stale Items: in-scope items with no state change in X days ────────────────
 
 function isBlocked(item) {
   const col = (item.boardColumn || '').toLowerCase()
@@ -724,43 +727,46 @@ function isBlocked(item) {
   return col.includes('blocked') || lane.includes('blocked') || hasTag
 }
 
+const NON_STALE_STATES = new Set(['Closed', 'Removed', 'Triage', 'New']);
+
 function calcStaleItems(items, staleDays = 2) {
   const cutoff = Date.now() - staleDays * 86400000;
-  const active = items.filter(i => i.state === 'Active');
+  const inScope = items.filter(i => !NON_STALE_STATES.has(i.state));
 
-  // Stale: active items with no change beyond threshold
-  const stale = active.filter(i => {
+  // Stale: in-scope items with no change beyond threshold
+  const stale = inScope.filter(i => {
     const changed = i.changedDate ? new Date(i.changedDate).getTime() : 0;
     return changed < cutoff;
   });
 
-  // Blocked: all active blocked items, regardless of how long
-  const blockedNotStale = active.filter(i => {
+  // Blocked: in-scope blocked items, regardless of how long
+  const blockedNotStale = inScope.filter(i => {
     const changed = i.changedDate ? new Date(i.changedDate).getTime() : 0;
-    return changed >= cutoff && isBlocked(i)
+    return changed >= cutoff && isBlocked(i);
   });
 
-  const combined = [...stale, ...blockedNotStale]
-  let blockedCount = 0
+  const combined = [...stale, ...blockedNotStale];
+  let blockedCount = 0;
   const result = combined.map(item => {
-    const blocked = isBlocked(item)
-    if (blocked) blockedCount++
-    const staleDaysActual = Math.floor((Date.now() - new Date(item.changedDate).getTime()) / 86400000)
+    const blocked = isBlocked(item);
+    if (blocked) blockedCount++;
+    const staleDaysActual = Math.floor((Date.now() - new Date(item.changedDate).getTime()) / 86400000);
     return {
       id: item.id,
       title: item.title,
       type: item.type,
       assignee: item.assignee,
       boardColumn: item.boardColumn || 'Unknown',
+      currentState: item.state || 'Unknown',
       staleDaysActual,
       blocked,
       url: item.url
-    }
+    };
   }).sort((a, b) => {
     // Blocked first, then by stalest
-    if (a.blocked !== b.blocked) return a.blocked ? -1 : 1
-    return b.staleDaysActual - a.staleDaysActual
-  })
+    if (a.blocked !== b.blocked) return a.blocked ? -1 : 1;
+    return b.staleDaysActual - a.staleDaysActual;
+  });
   return {
     total: result.length,
     blocked: blockedCount,
@@ -2121,6 +2127,7 @@ function renderStaleItemsTable(container, staleData) {
       <td style="padding:4px 6px;font-size:.75rem;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escSvg(d.title)}</td>
       <td style="padding:4px 6px;font-size:.75rem;color:var(--muted, #94a3b8)">${escSvg(d.assignee || 'Unassigned')}</td>
       <td style="padding:4px 6px;font-size:.75rem;color:var(--muted, #94a3b8)">${escSvg(d.boardColumn)}</td>
+      <td style="padding:4px 6px;font-size:.75rem">${escSvg(d.currentState || '')}</td>
       <td style="padding:4px 6px;font-size:.75rem;font-weight:600;color:${daysColor}">${d.staleDaysActual}d</td>
     </tr>`
   }).join('')
@@ -2133,6 +2140,7 @@ function renderStaleItemsTable(container, staleData) {
         <th style="padding:4px 6px;font-size:.65rem;text-align:left;color:var(--muted, #94a3b8);font-weight:600">Title</th>
         <th style="padding:4px 6px;font-size:.65rem;text-align:left;color:var(--muted, #94a3b8);font-weight:600">Assignee</th>
         <th style="padding:4px 6px;font-size:.65rem;text-align:left;color:var(--muted, #94a3b8);font-weight:600">Column</th>
+        <th style="padding:4px 6px;font-size:.65rem;text-align:left;color:var(--muted, #94a3b8);font-weight:600">State</th>
         <th style="padding:4px 6px;font-size:.65rem;text-align:left;color:var(--muted, #94a3b8);font-weight:600">Days</th>
       </tr></thead>
       <tbody>${rows}</tbody>
