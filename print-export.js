@@ -49,6 +49,15 @@
   })
   const wip = wipItems.length
 
+  // Average cycle time (active → closed) — matches the on-screen "AVG CYCLE" figure.
+  // Reads/populates the startedAtCache via shared.js's enrichWithStartedAt.
+  const enrichedAll = await enrichWithStartedAt(allItems, settings)
+  const ctData = calcCycleTimes(enrichedAll)
+  const ctValid = ctData.filter(i => i.inProgressToClose !== null)
+  const cycleAvg = ctValid.length
+    ? +(ctValid.reduce((s, i) => s + i.inProgressToClose, 0) / ctValid.length).toFixed(1)
+    : null
+
   function dlt(curr, prev) {
     if (prev == null || curr === '—') return ''
     const d = curr - prev
@@ -107,6 +116,7 @@
       <div class="at-a-glance">
         <div class="kpi"><div class="kpi-label">Arrival</div><div class="kpi-value">${arrLast}</div>${kpiDelta(arrLast, arrPrev, true)}</div>
         <div class="kpi"><div class="kpi-label">Throughput</div><div class="kpi-value">${tpLast}</div>${kpiDelta(tpLast, tpPrev, false)}</div>
+        <div class="kpi"><div class="kpi-label">Cycle Time</div><div class="kpi-value">${cycleAvg !== null ? cycleAvg + 'd' : '—'}</div></div>
         <div class="kpi"><div class="kpi-label">Active WIP</div><div class="kpi-value">${wip}</div></div>
         <div class="kpi"><div class="kpi-label">Stale / Blocked</div><div class="kpi-value">${stale.total}</div></div>
       </div>
