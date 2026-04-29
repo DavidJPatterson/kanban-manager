@@ -64,6 +64,14 @@
     return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')
   }
 
+  function kpiDelta(curr, prev, upIsBad) {
+    if (prev == null || curr === '—') return ''
+    const d = curr - prev
+    if (d === 0) return `<div class="kpi-delta">→ vs prev wk</div>`
+    const cls = (upIsBad ? d > 0 : d < 0) ? 'down' : 'up'
+    return `<div class="kpi-delta ${cls}">${d > 0 ? '↑' : '↓'}${Math.abs(d)} vs prev wk</div>`
+  }
+
   function renderEntry(e, includeOwner) {
     const sev = e.severity ? `<span class="sev sev-${e.severity}">${e.severity.toUpperCase()}</span> ` : ''
     const needs = e.needsFromLeadership ? ' <span class="needs">NEEDS LEADERSHIP</span>' : ''
@@ -90,15 +98,15 @@
       <ul class="actions">${wu.unitHeadline.actions.map(e => renderEntry(e, true)).join('') || '<li class="muted">No headline actions recorded.</li>'}</ul>
       <h2>At a Glance</h2>
       <div class="at-a-glance">
-        Arrival ${arrLast}${dlt(arrLast, arrPrev)} ·
-        Throughput ${tpLast}${dlt(tpLast, tpPrev)} ·
-        Active WIP ${wip} ·
-        Stale/Blocked ${stale.total}
+        <div class="kpi"><div class="kpi-label">Arrival</div><div class="kpi-value">${arrLast}</div>${kpiDelta(arrLast, arrPrev, true)}</div>
+        <div class="kpi"><div class="kpi-label">Throughput</div><div class="kpi-value">${tpLast}</div>${kpiDelta(tpLast, tpPrev, false)}</div>
+        <div class="kpi"><div class="kpi-label">Active WIP</div><div class="kpi-value">${wip}</div></div>
+        <div class="kpi"><div class="kpi-label">Stale / Blocked</div><div class="kpi-value">${stale.total}</div></div>
       </div>
       <div class="actions-by-lead">
-        Actions next week by lead:
+        <span class="label">Actions next week by lead:</span>
         ${Object.entries(byOwner).map(([k, n]) =>
-          `<span class="${k === 'Unassigned' ? 'unassigned' : ''}">${escHtml(k)} ${n}</span>`).join(' · ') || 'no actions'}
+          `<span class="lead-tag ${k === 'Unassigned' ? 'unassigned' : ''}">${escHtml(k)} ${n}</span>`).join(' ') || 'no actions'}
       </div>
     </section>
   `
