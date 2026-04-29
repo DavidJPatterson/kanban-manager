@@ -1460,6 +1460,11 @@ async function buildExecutiveSummaryPanel(cachedData, settings, sortedPods) {
     `
   }
 
+  const steadyPods = pods.filter(p => wu.pods?.[p.id]?.steady)
+  if (steadyPods.length > 0) {
+    html += `<div class="exec-steady-footer">💤 Steady this week: ${steadyPods.map(p => escHtml(p.name)).join(' · ')}</div>`
+  }
+
   html += '</div>'
   panel.innerHTML = html
 
