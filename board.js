@@ -1000,13 +1000,24 @@ async function buildExecutiveSummaryPanel(cachedData, settings, sortedPods) {
         : '<span class="exec-owner exec-owner-empty">no owner</span>'
     }
     const teamLeads = settings.teamLeads || []
-    const podLeads = teamLeads.filter(l => (l.podIds || []).includes(pod.id))
-    const otherLeads = teamLeads.filter(l => !(l.podIds || []).includes(pod.id))
-    const assignees = [...new Set((pod.items || []).filter(i => i.assignee).map(i => i.assignee))]
+    const currentValue = currentOwner ? `${currentOwner.kind}:${currentOwner.id || ''}:${currentOwner.name}` : ''
     function opt(value, label, selected) {
       return `<option value="${escAttr(value)}" ${selected ? 'selected' : ''}>${escHtml(label)}</option>`
     }
-    const currentValue = currentOwner ? `${currentOwner.kind}:${currentOwner.id || ''}:${currentOwner.name}` : ''
+    // Unit-level: single group of all team leads
+    if (!pod) {
+      return `
+        <select class="exec-owner-picker">
+          <option value="">— select owner —</option>
+          ${teamLeads.length ? `<optgroup label="Team Leads">${teamLeads.map(l => opt(`lead:${l.id}:${l.name}`, `👑 ${l.name}`, currentValue === `lead:${l.id}:${l.name}`)).join('')}</optgroup>` : ''}
+          <option value="__custom__">+ Add custom...</option>
+        </select>
+      `
+    }
+    // Pod-level: grouped by this-pod / pod-members / other-pods (existing behaviour)
+    const podLeads = teamLeads.filter(l => (l.podIds || []).includes(pod.id))
+    const otherLeads = teamLeads.filter(l => !(l.podIds || []).includes(pod.id))
+    const assignees = [...new Set((pod.items || []).filter(i => i.assignee).map(i => i.assignee))]
     return `
       <select class="exec-owner-picker">
         <option value="">— select owner —</option>
@@ -1030,7 +1041,7 @@ async function buildExecutiveSummaryPanel(cachedData, settings, sortedPods) {
                 <option value="watch"   ${e.severity === 'watch' ? 'selected' : ''}>watch</option>
               </select>`)
         : ''
-      const ownerHtml = (category === 'issues' || category === 'actions') && pod
+      const ownerHtml = (category === 'issues' || category === 'actions')
         ? renderOwnerPicker(pod, e.owner, readonly)
         : ''
       const dueHtml = (category === 'actions')
