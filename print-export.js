@@ -39,7 +39,14 @@
   const arrLast = arr[arr.length - 2]?.count ?? '—'
   const arrPrev = arr[arr.length - 3]?.count ?? null
   const stale = calcStaleItems(allItems, settings.staleDays || 2)
-  const wipItems = allItems.filter(i => !['Closed','Removed','Resolved'].includes(i.state))
+  // Active WIP: items currently in In Progress / Active / In Review columns.
+  // Match the on-screen Exec Summary KPI card definition in board.js — NOT
+  // "everything alive" (which would also include the backlog: Triage/New/etc.).
+  const totalActive = allItems.filter(i => !['Closed', 'Removed', 'Resolved'].includes(i.state))
+  const wipItems = totalActive.filter(i => {
+    const col = (i.boardColumn || i.state || '').toLowerCase()
+    return col.includes('progress') || col.includes('active') || col.includes('review')
+  })
   const wip = wipItems.length
 
   function dlt(curr, prev) {
