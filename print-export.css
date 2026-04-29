@@ -1,0 +1,74 @@
+/* print-export.css — A4 portrait, 11pt body, severity colours */
+
+@page { size: A4 portrait; margin: 18mm; }
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 11pt;
+  line-height: 1.4;
+  color: #111;
+  margin: 0;
+}
+
+#print-root { max-width: 100%; }
+
+.loading { color: #666; font-style: italic; }
+
+header { margin-bottom: 16px; }
+header h1 { font-size: 18pt; margin: 0 0 4px 0; }
+header .meta { font-size: 9pt; color: #555; }
+
+h2 { font-size: 14pt; margin: 12px 0 4px 0; padding-bottom: 2px; border-bottom: 1px solid #ddd; }
+h3 { font-size: 12pt; margin: 8px 0 4px 0; }
+
+ul { margin: 4px 0 8px 18px; padding: 0; }
+li { margin: 2px 0; }
+li.muted { color: #888; font-style: italic; }
+
+.sev { font-size: 8pt; padding: 1px 5px; border-radius: 2px; color: white; font-weight: 700; vertical-align: middle; }
+.sev-blocker { background: #dc2626; }
+.sev-risk    { background: #d97706; }
+.sev-watch   { background: #0891b2; }
+
+.needs { background: #fef3c7; color: #92400e; padding: 1px 5px; border-radius: 2px; font-size: 8pt; font-weight: 700; }
+.owner { font-weight: 600; }
+.carried { color: #6366f1; font-size: 9pt; }
+.src { color: #777; font-size: 9pt; font-style: italic; }
+
+.at-a-glance {
+  font-size: 11pt;
+  background: #f3f4f6;
+  padding: 6px 10px;
+  border-radius: 4px;
+  margin: 6px 0;
+}
+
+.actions-by-lead {
+  font-size: 10pt;
+  margin: 4px 0;
+  padding: 4px 0;
+}
+.actions-by-lead .unassigned { color: #dc2626; font-weight: 700; }
+
+.page-1 { page-break-after: always; }
+
+.pod-card {
+  page-break-inside: avoid;
+  margin-bottom: 10px;
+  padding: 6px 10px;
+  border-left: 3px solid #6366f1;
+  background: #fafafa;
+}
+
+.steady-footer {
+  margin-top: 16px;
+  padding-top: 8px;
+  border-top: 1px solid #ddd;
+  font-size: 9pt;
+  color: #555;
+}
+
+@media print {
+  /* Hide any browser-injected chrome that might leak through */
+  body { background: white; }
+}
