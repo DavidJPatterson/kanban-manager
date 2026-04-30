@@ -4,7 +4,7 @@ All notable changes to Kanban Manager are documented here.
 
 ---
 
-## [1.3.3] — 2026-04-30
+## [1.3.4] — 2026-04-30
 
 ### Added
 
