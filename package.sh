@@ -25,6 +25,10 @@ zip -r "$OUT" \
   options.js \
   team.html \
   team.js \
+  print-export.html \
+  print-export.js \
+  print-export.css \
+  weekly-update.js \
   icons/icon-16.png \
   icons/icon-48.png \
   icons/icon-128.png \
