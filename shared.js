@@ -731,7 +731,7 @@ const NON_STALE_STATES = new Set(['Closed', 'Removed', 'Triage', 'New']);
 
 function calcStaleItems(items, staleDays = 2) {
   const cutoff = Date.now() - staleDays * 86400000;
-  const inScope = items.filter(i => !NON_STALE_STATES.has(i.state));
+  const inScope = items.filter(i => !NON_STALE_STATES.has(i.state) && !isReadyColumn(i.boardColumn || i.state || ''));
 
   // Stale: in-scope items with no change beyond threshold
   const stale = inScope.filter(i => {

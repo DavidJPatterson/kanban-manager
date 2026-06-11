@@ -4,6 +4,14 @@ All notable changes to Kanban Manager are documented here.
 
 ---
 
+## [1.3.5] — 2026-06-11
+
+### Fixed
+
+- **Ready columns excluded from stale detection** — Items in any Ready-family column (`Ready`, `Ready for Test`, `Ready for Demo`, `Ready for Release`) were incorrectly appearing in the stale/blocked count. These are holding queues, not in-flight work, and should never be flagged as stale. Fixed by reusing the existing `isReadyColumn()` check in `calcStaleItems`, consistent with how Ready columns are already excluded from WIP limit breach detection.
+
+---
+
 ## [1.3.4] — 2026-04-30
 
 ### Added
